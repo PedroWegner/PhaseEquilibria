@@ -39,10 +39,10 @@ for l in filter(None, sheet.iter_rows(min_row=2, values_only=True)):
 wb.save((os.path.dirname(os.path.abspath(__file__)) + f'\\data\\teste.xlsx'))
 """
 
-Tc = [190.6, 304.2]
-Pc = [45.99e5, 73.83e5]
-omega= [0.012, 0.224]
-x = [0.9790, 0.0210]
+Tc = [190.6, 647.1]
+Pc = [45.99e5, 220.55e5]
+omega= [0.012, 0.345]
+x = [0.9790, 1-0.9790]
 T_o = 128.18
 P_o = 3.243e5
 state_liquid = Peng_robinson_state(
@@ -64,7 +64,7 @@ state_liquid = Peng_robinson_state(
 # print(rho)
 
 wb = openpyxl.load_workbook(
-        (os.path.dirname(os.path.abspath(__file__)) + f'\\data\\methane_carbonDioxide.xlsx'))
+        (os.path.dirname(os.path.abspath(__file__)) + f'\\data\\methane_water.xlsx'))
 
 sheet = wb.active
 row = 2
@@ -80,17 +80,17 @@ for l in filter(None, sheet.iter_rows(min_row=2, values_only=True)):
     state_liquid.x = np.array(x)
     state_liquid.T = T
     state_liquid.P = P
-    update_state(state=state_liquid, liq=True)
+    update_state(state=state_liquid, liq=False)
     V = state_liquid.Z * R * state_liquid.T * 1000 / state_liquid.P
     rho = 1 / V
     erro = abs(float(l[3]) - rho) / float(l[3])
     erro_relativo = (float(l[3]) - rho)**2 / rows
-    if erro > 0.3:
-        update_state(state=state_liquid, liq=False)
-        V = state_liquid.Z * R * state_liquid.T * 1000 / state_liquid.P
-        rho = 1 / V
-        erro = abs(float(l[3]) - rho) / float(l[3])
-        erro_relativo = (float(l[3]) - rho) ** 2 / rows
+    # if erro > 0.3:
+    #     update_state(state=state_liquid, liq=False)
+    #     V = state_liquid.Z * R * state_liquid.T * 1000 / state_liquid.P
+    #     rho = 1 / V
+    #     erro = abs(float(l[3]) - rho) / float(l[3])
+    #     erro_relativo = (float(l[3]) - rho) ** 2 / rows
 
     print(f"Z: {state_liquid.Z} - rho: {rho}")
     sheet[f'E{row}'] = V

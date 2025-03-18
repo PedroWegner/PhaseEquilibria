@@ -15,13 +15,22 @@ N_Avogrado = 6.02214076e23 # mol-1
 R = K_boltz * N_Avogrado # J mol-1 K-1
 
 class PC_saft_state():
-    def __init__(self, T: float, P: float, ncomp: int, x: list[float], m: list[float], sigma: list[float], epsilon: list[float]):
+    def __init__(self,
+                T: float,
+                P: float,
+                ncomp: int,
+                x: list[float],
+                m: list[float],
+                sigma: list[float],
+                epsilon: list[float],
+                liquid: bool):
         # VARIAVEIS DA MISTURA
         self.ncomp = ncomp
         self.x = np.array(x)
         self.m = np.array(m)
         self.sigma = np.array(sigma)
         self.epsilon = np.array(epsilon)
+        self.liquid = liquid
 
         # PROPRIEDADES DO ESTADO
         self.T = T
@@ -78,7 +87,9 @@ class PC_saft_state():
         self.b_x = np.zeros((7, self.ncomp))
 
 
-
+# ************************************************************
+# INICIO DAS FUNCOES PARA CALCULO DA HELMHOLTZ E COMPRESSIBILIDADE
+# ************************************************************
 def calc_diameter_T(state: PC_saft_state) -> None:
     # EQ (A.9)
     state.d = state.sigma * (1.0e0 - 0.12e0 * np.exp(- 3.0e0 * state.epsilon / state.T))
@@ -201,6 +212,9 @@ def compressibility(state: PC_saft_state) -> None:
     state.Z = 1 + state.Z_hc + state.Z_disp
 
 # ************************************************************
+# FIM DAS FUNCOES PARA CALCULO DA HELMHOLTZ E COMPRESSIBILIDADE
+# ************************************************************
+# ************************************************************
 # INICIO DAS FUNCOES PARA CALCULO DA FUGACIDADE
 # ************************************************************
 
@@ -253,7 +267,7 @@ def calc_chemical_pow(state: PC_saft_state) -> None:
 
     # AUXILIARES DA EQ (A.37)
     aux_1 = state.zeta_x[3, :] / zeta_aux**2
-    aux_2 = 3 * state.zeta_x[2, :] / zeta_aux**2 + 6 * state.zeta[2] * state.zeta_x[3, :] / zeta_aux**2
+    aux_2 = 3 * state.zeta_x[2, :] / zeta_aux**2 + 6 * state.zeta[2] * state.zeta_x[3, :] / zeta_aux**3
     aux_3 = 4 * state.zeta[2] * state.zeta_x[2, :] / zeta_aux**3 + 6 * state.zeta[2]**2 * state.zeta_x[3, :] / zeta_aux**4
     d_ij = state.d[:, np.newaxis] * state.d[np.newaxis, :] / (state.d[:, np.newaxis] + state.d[np.newaxis, :])
     # EQ (A.37)
@@ -261,8 +275,9 @@ def calc_chemical_pow(state: PC_saft_state) -> None:
 
     # AUXILIARES DA EQ (A.35)
     sum_aux = np.sum(state.x * (state.m - 1) * (state.g_ij.diagonal())**-1 * state.grad_g_ij_x[:, :, 0].diagonal(), axis=0)
+    aux_1 = - (state.m - 1) * np.log(state.g_ij.diagonal())
     # EQ (A.35)
-    state.prime_helmholtz_hc_x = state.m * state.helmholtz_hs + state.mean_m * state.prime_helmholtz_hs_x - sum_aux
+    state.prime_helmholtz_hc_x = state.m * state.helmholtz_hs + state.mean_m * state.prime_helmholtz_hs_x - sum_aux + aux_1
 
     # AUXILIARES DA EQ (A.38)
     aux_1 = - 2 * np.pi * state.rho * (state.I_1_x * state.m2es3 + state.I_1 * state.m2es3_x)
@@ -291,11 +306,41 @@ def calc_fugacity(state: PC_saft_state) -> None:
 # FIM DAS FUNCOES PARA CALCULO DA FUGACIDADE
 # ************************************************************
 
+# ************************************************************
+# INICIO FUNCOES DE CALCULAR O ETA
+# ************************************************************
 def calc_rho(state: PC_saft_state) -> None:
     sum_aux = np.sum(state.x * state.m * state.d**3)
     state.rho = (6 * state.eta / np.pi) * sum_aux**-1
 
-def update_state(state: PC_saft_state) -> None:
+def calc_P(state: PC_saft_state) -> None:
+    global K_boltz
+    P = state.Z * K_boltz * state.T * state.rho * 1.0e10**3
+    return P
+
+def res_pressao(eta: float, state: PC_saft_state) -> float:
+    state.eta = eta
+    calc_state(state)
+    P_calc = calc_P(state)
+    return np.abs(1 - state.P / P_calc)
+
+
+def calc_eta(state: PC_saft_state) -> float:
+    if state.liquid:
+        eta_0 = 0.5e0
+    else:
+        eta_0 = 1e-10
+    eta = minimize(res_pressao, x0=eta_0, args=(state), method='Nelder-Mead', tol=1e-8)
+    state.eta = eta.x[0]
+
+# ************************************************************
+# FIM FUNCOES DE CALCULAR O ETA
+# ************************************************************
+
+# ************************************************************
+# INICIO UPDATE STATE
+# ************************************************************
+def calc_state(state: PC_saft_state) -> None:
     calc_diameter_T(state=state)
     calc_rho(state)
     calc_mean_m(state=state)
@@ -308,45 +353,59 @@ def update_state(state: PC_saft_state) -> None:
     calc_C_12(state=state)
     calc_abbr_mes(state=state)
     calc_grad_g_rho(state=state)
-
-def calc_state(state: PC_saft_state) -> None:
     helmholtz_residual(state=state)
     compressibility(state=state)
 
-def calc_P(state: PC_saft_state) -> None:
-    global K_boltz
-    P = state.Z * K_boltz * state.T * state.rho * 1.0e10**3
-    state.P = P
-    return P
-
-def res_pressao(eta: float, state: PC_saft_state, P_sis: float) -> float:
-    state.eta = eta
-    update_state(state)
-    calc_state(state)
-    P_calc = calc_P(state)
-    return (P_calc - P_sis)**2
+def update_state(state):
+    calc_eta(state=state)
+    calc_state(state=state)
+    calc_fugacity(state=state)
+# ************************************************************
+# FIM UPDATE STATE
+# ************************************************************
 
 
-def calc_eta(state: PC_saft_state, P_req: float, eta_init: float) -> float:
-    eta = minimize(res_pressao, x0=eta_init, args=(state, P_req), method='Nelder-Mead', tol=1e-6)
-    state.eta = eta.x[0]
 
-def res_K(P: float, state_liq, state_gas) -> float:
-    state_liq.P = P
-    state_gas.P = P
-    calc_eta(state=state_liq, P_req=P, eta_init=0.2e0)
-    calc_eta(state=state_gas, P_req=P, eta_init=0.0005)
-    update_state(state=state_liq)
-    update_state(state=state_gas)
-    calc_state(state=state_liq)
-    calc_state(state=state_gas)
-    print(state_liq.eta, state_gas.eta)
-    print(state_liq.Z, state_gas.Z)
-    calc_fugacity(state=state_liq)
-    calc_fugacity(state=state_gas)
-    K = np.sum(state_liq.phi * state_liq.x / state_gas.phi)
+if __name__ == "__main__":
+    # Abaixo eh um teste EXEMPLO 13.7 DO VAN
+    # m = [1.2053, 1.0000]
+    # sigma = [3.3130, 3.7039]
+    # epsilon_ = [90.96, 150.03]
+    m = [1.000, 2.3316]
+    sigma = [3.7039, 3.7086]
+    epsilon_ = [150.03, 222.88]
+    T_o = 310.93  # K
+    P_o = 73.5e5
+    x_o = 0.25
+    x = [x_o, 1 - x_o]
+    
+    state = PC_saft_state(T=T_o,
+                                 P=P_o,
+                                 ncomp=2,
+                                 x=x,
+                                 m=m,
+                                 sigma=sigma,
+                                 epsilon=epsilon_,
+                                 liquid=True)
+    update_state(state=state)
+    print(state.Z)
+    print(state.phi)
 
-    state_gas.x = (state_liq.phi * state_liq.x / state_gas.phi) / K
-    print(state_gas.x)
-    res = (1 - K)**2
-    return res
+    # m = [2.3316]
+    # sigma = [3.7086]
+    # epsilon_ = [222.88]
+    # T_o = 350  # K
+    # P_o = 9.7543e5
+
+    # state = PC_saft_state(T=T_o,
+    #                              P=P_o,
+    #                              ncomp=1,
+    #                              x=[1.0],
+    #                              m=m,
+    #                              sigma=sigma,
+    #                              epsilon=epsilon_,
+    #                              liquid=True)
+    
+    # update_state(state=state)
+    # print(state.Z)
+    # print((state.Z * R * T_o / P_o)*100**3)

@@ -1,7 +1,6 @@
 import numpy as np
 from scipy.optimize import  fsolve, minimize
 import matplotlib.pyplot as plt
-from sympy.physics.units import stefan
 
 # EQUAÇÕES DO VAN NESS
 sigma_PR = 1 + np.sqrt(2)
@@ -11,7 +10,7 @@ psi_PR = 0.45724
 R = 8.3144621
 
 class Peng_robinson_state():
-    def __init__(self,T: float, P: float, ncomp: int, x: list[float], Tc: list[float], Pc: list[float], omega: list[float]):
+    def __init__(self,T: float, P: float, ncomp: int, x: list[float], Tc: list[float], Pc: list[float], omega: list[float], liquid: bool):
         # VARIAVEIS DA MISTURA
         self.ncomp = ncomp
         self.x = np.array(x)
@@ -22,6 +21,8 @@ class Peng_robinson_state():
         self.T = T
         self.P = P
         self.Z = type[float]
+        ### Liquid = True | Gas = False
+        self.liquid = liquid
         #
         self.a = type[float]
         self.b = type[float]
@@ -42,15 +43,16 @@ class Peng_robinson_state():
         self.ln_phi = np.zeros(self.ncomp)
         self.phi = np.zeros(self.ncomp)
 
-def update_state(state: Peng_robinson_state, liq: bool) -> None:
+def update_state(state: Peng_robinson_state) -> None:
     calc_ind_parameters(state=state)
     calc_combining_rule(state=state)
     calc_parameter_mixture(state=state)
-    if liq:
+    if state.liquid:
         compressibility(state=state, Z_init=state.beta)
     else:
         compressibility(state=state, Z_init=1.0e0)
     prime_p_i(state=state)
+    fugacity(state=state)
 
 def calc_ind_parameters(state: Peng_robinson_state) -> None:
     global omega_PR, psi_PR, R
@@ -96,13 +98,31 @@ def fugacity(state: Peng_robinson_state) -> None:
 def res_K(P: float, state_liq, state_gas) -> float:
     state_liq.P = P
     state_gas.P = P
-    update_state(state=state_liq, liq=True)
-    update_state(state=state_gas, liq=False)
-    fugacity(state=state_liq)
-    fugacity(state=state_gas)
+    update_state(state=state_liq)
+    update_state(state=state_gas)
     K = np.sum(state_liq.phi * state_liq.x / state_gas.phi)
     state_gas.x = (state_liq.phi * state_liq.x / state_gas.phi) / K
     res = (1 - K)**2
     return res
 
 
+if __name__ == '__main__':
+    Tc = [425.1]
+    Pc = [ 37.96e5]
+    omega = [0.200]
+    T = 350.0 #K
+    P = 9.4573e5
+
+    state = Peng_robinson_state(T=T,
+                                P=P,
+                                ncomp=1,
+                                x=[1.0],
+                                Tc=Tc,
+                                Pc=Pc,
+                                omega=omega,
+                                liquid=False)
+    
+    update_state(state=state)
+    print(state.Z)
+    print(state.phi)
+    print(state.Z * R * T * 100**3 / P)

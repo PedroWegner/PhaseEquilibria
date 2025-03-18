@@ -44,9 +44,9 @@ for l in filter(None, sheet.iter_rows(min_row=2, values_only=True)):
 
 wb.save((os.path.dirname(os.path.abspath(__file__)) + f'\\data\\teste_2.xlsx'))"""
 
-m = [1.00, 2.0729]
-sigma = [3.7039, 2.7852]
-epsilon_ = [150.03, 169.21]
+m = [1.00, 2.58]
+sigma = [3.7039, 2.61]
+epsilon_ = [150.03, 150.17]
 T_o = 390.256
 P_o = 40.858e5
 state_liquid = PC_saft_state(
@@ -64,7 +64,7 @@ wb = openpyxl.load_workbook(
 
 sheet = wb.active
 row = 2
-k_ij = np.array([[0.0, 0.065], [0.065, 0.0]])
+k_ij = np.array([[0.0, 0.0], [0.0, 0.0]])
 print(k_ij)
 soma = 0.0
 rows = sum(1 for row in sheet.iter_rows(values_only=True) if any(row)) - 1
@@ -79,18 +79,18 @@ for l in filter(None, sheet.iter_rows(min_row=2, values_only=True)):
     state_liquid.x = np.array(x)
     state_liquid.T = T
     state_liquid.P = P
-    calc_eta(state=state_liquid, P_req=P, eta_init=0.3)
+    calc_eta(state=state_liquid, P_req=P, eta_init=10**-10)
     rho = (state_liquid.rho / N_Avogrado) * (10 ** 10) ** 3 * (10 ** -3)
     V = 1 / rho
     erro = abs(float(l[3]) - rho) / float(l[3])
     erro_relativo = (float(l[3]) - rho) ** 2 / rows
 
-    if erro > 0.3:
-        calc_eta(state=state_liquid, P_req=P, eta_init=10**-10)
-        rho = (state_liquid.rho / N_Avogrado) * (10 ** 10) ** 3 * (10 ** -3)
-        V = 1 / rho
-        erro = abs(float(l[3]) - rho) / float(l[3])
-        erro_relativo = (float(l[3]) - rho) ** 2 / rows
+    # if erro > 0.3:
+    #     calc_eta(state=state_liquid, P_req=P, eta_init=10**-10)
+    #     rho = (state_liquid.rho / N_Avogrado) * (10 ** 10) ** 3 * (10 ** -3)
+    #     V = 1 / rho
+    #     erro = abs(float(l[3]) - rho) / float(l[3])
+    #     erro_relativo = (float(l[3]) - rho) ** 2 / rows
 
     print(f"Z: {state_liquid.Z} - rho: {rho}")
     sheet[f'I{row}'] = V[0]
