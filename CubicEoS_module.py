@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Dict, Optional
 import numpy as np
+from scipy.linalg import eigh
 
 RGAS_SI = 8.314 # constantes dos gases J mol-1 K-1
 @dataclass
@@ -19,10 +20,10 @@ class Mixture:
 @dataclass
 class State:
     mixture: Mixture
-    T: float
-    P: float
     z: np.ndarray
     is_vapor: bool
+    T: float
+    P: Optional[float] = None
     Z: Optional[float] = None
     Vm: Optional[float] = None
     V: Optional[float] = None
@@ -31,6 +32,7 @@ class State:
     P_derivatives: Optional[Dict[str, any]] = None
     fugacity_dict: Optional[Dict[str, any]] = None
     residual_props: Optional[Dict[str, float]] = None
+    params: Optional[Dict[str, any]] = None
     
 
 class CubicParametersWorker:
@@ -194,8 +196,15 @@ class SolveZWorker:
         Z = [r.real for r in Z if np.isclose(r.imag, 0) and r.real > 0]
         return sorted(Z)
 
+    def get_Z_(self, state: State) -> tuple:
+        A = state.params['a_mix'] * state.P / (RGAS_SI * state.T)**2
+        B = state.params['b_mix'] * state.P / (RGAS_SI * state.T)
+        Z = self._solver_Z(A=A, B=B)
+        return Z
+
     def get_Z(self, state: State, params) -> tuple:
         state = state
+        # print(state.params)
         A = params['a_mix'] * state.P / (RGAS_SI * state.T)**2
         B = params['b_mix'] * state.P / (RGAS_SI * state.T)
         Z = self._solver_Z(A=A, B=B)
@@ -323,7 +332,6 @@ class CubicHelmholtzDerivativesWorker:
         t_FnB = FnB * (np.add.outer(Bi, Bi))
         t_FBD = FBD * (np.outer(Bi, Di) + np.outer(Di, Bi))
         self.derivatives['dF_dninj'] = t_FnB + t_FBD + FB * Bij + FBB * np.outer(Bi, Bi) + FD * Dij
-
         self.derivatives['dF_dniT'] = (FBT + FBD * DT) * Bi + FDT * Di + FD * DiT
         self.derivatives['dF_dniV'] = FnV + FBV * Bi + FDV * Di 
         self.derivatives['dF_dTT'] = FTT + 2 * FDT * DT + FD * DTT
@@ -395,6 +403,8 @@ class ResidualPropertiesWorker:
         self.residual_dict['Hr'] = Ar + state.T * Sr_TVn + state.P * state.V - state.n * RGAS_SI * state.T
         self.residual_dict['Gr'] = Ar + state.P * state.V - state.n * RGAS_SI * state.T * (1 + np.log(state.Z))
 
+        self.residual_dict['F'] = core_model['F']
+
     def residual_props_to_dict(self, state: State, core_model: Dict[str, any]) -> Dict[str, float]:
         self.residual_dict = {}
         self._calculate_residual_properties(state=state, core_model=core_model)
@@ -449,11 +459,30 @@ class TestDerivativesEngine:
         else:
             print('Teste de entalpia residual é uma fraude!!!!!')
 
+    def _second_derivatives(self, state: State) -> None:
+            dF_dVV = state.helmholtz_derivatives['dF_dVV']
+            dF_dniV = state.helmholtz_derivatives['dF_dniV']
+            dF_dninj = state.helmholtz_derivatives['dF_dninj']
+            n = state.n
+            n_array = state.z * n
+            V = state.Vm * n
+
+            first_value = V * dF_dniV + n_array @ dF_dninj
+            first_test = np.allclose(first_value, 0, 1e-6)
+            second_value = V * dF_dVV + n_array @ dF_dniV
+            second_test = np.isclose(second_value, 0, 1e-6)
+            _test = first_test and second_test
+            if _test:
+                print('O teste de criticalidade passaram (Eq. 60 e 61, cap.2)')
+            else: 
+                print("As segunda derivadas não passaram")
+
     def tests(self, state: State) -> None:
         self._test_residual_gibbs(state=state)
         self._test_gibbs_duhem(state=state)
         self._test_pressure_derivatives(state=state)
         self._test_temperature_derivatives(state=state)
+        self._second_derivatives(state=state)
 
 class ModeloPengRobinson: #essa classe pode ser quebrada para adotar outras EoS cubicas!!!!
     def __init__(self):
@@ -476,41 +505,89 @@ class ModeloPengRobinson: #essa classe pode ser quebrada para adotar outras EoS 
     def calculate_state(self, state: State) -> None:
         # Worker especifico da Strategy
         params = self.params_worker.params_to_dict(state=state)
+        state.params = params
 
-        Z, is_vapor = self.solver_Z_worker.get_Z(state=state, params=params)
+        Z, is_vapor = self.solver_Z_worker.get_Z(state=state, params=params) # ponto de apoio
         state.is_vapor = is_vapor
         if state.is_vapor:
             state.Z = max(Z)
         else:
             state.Z = min(Z)
-
         state.Vm = state.Z * RGAS_SI * state.T / state.P
         state.V = state.Vm * state.n
 
-        core_model = self.core_model_worker.core_model_to_dict(state=state, params=params)
+        core_model = self.core_model_worker.core_model_to_dict(state=state, params=params) # ponto de apoio
 
         state.helmholtz_derivatives = self.helmholtz_derivatives_worker.helmholtz_derivatives_to_dict(params=params, core_model=core_model)
         state.P_derivatives = self.pression_derivatives_worker.P_derivatives_to_dict(state=state)
         state.fugacity_dict = self.fugacity_worker.fugacity_to_dict(state=state)
         state.residual_props = self.residual_props_worker.residual_props_to_dict(state=state, core_model=core_model)
 
+    def calculate_params(self, state: State) -> None:
+        state.params = self.params_worker.params_to_dict(state=state)
+
+    def calculate_state_2(self, state: State) -> None:
+        # params = self.params_worker.params_to_dict(state=state)
+        # state.params
+        # state.Vm = 4 * params['b_mix']
+        Vm = state.Vm
+        T = state.T
+        b = state.params['b_mix']
+        a = state.params['a_mix']
+
+        P = RGAS_SI * T / (Vm - b) - a / ((Vm + self.delta1 * b) * (Vm + self.delta2 * b))
+        state.P = P
+        Z = P * Vm / (RGAS_SI * T)
+        state.Z = Z
+        state.V = state.Vm * state.n
+        core_model = self.core_model_worker.core_model_to_dict(state=state, params=state.params)
+
+        state.helmholtz_derivatives = self.helmholtz_derivatives_worker.helmholtz_derivatives_to_dict(params=state.params, core_model=core_model)
+        state.P_derivatives = self.pression_derivatives_worker.P_derivatives_to_dict(state=state)
+        state.fugacity_dict = self.fugacity_worker.fugacity_to_dict(state=state)
+        state.residual_props = self.residual_props_worker.residual_props_to_dict(state=state, core_model=core_model)
+
+
+
+    def _get_Z(self, state: State) -> np.ndarray:
+        params = self.params_worker.params_to_dict(state=state)
+        state.params = params
+        Z = self.solver_Z_worker.get_Z_(state=state) # ponto de apoio
+        return Z
+
+    def calculate_state_3(self, state: State, Z: np.ndarray) -> None:
+        state.Z = Z
+        # if state.is_vapor:
+        #     state.Z = max(Z)
+        # else:
+        #     state.Z = min(Z)
+        state.Vm = state.Z * RGAS_SI * state.T / state.P
+        state.V = state.Vm * state.n
+
+        core_model = self.core_model_worker.core_model_to_dict(state=state, params=state.params) # ponto de apoio
+
+        state.helmholtz_derivatives = self.helmholtz_derivatives_worker.helmholtz_derivatives_to_dict(params=state.params, core_model=core_model)
+        state.P_derivatives = self.pression_derivatives_worker.P_derivatives_to_dict(state=state)
+        state.fugacity_dict = self.fugacity_worker.fugacity_to_dict(state=state)
+        state.residual_props = self.residual_props_worker.residual_props_to_dict(state=state, core_model=core_model)
+        
+
+        
 
 if __name__ == '__main__':
     # 1. Instancia os componentes teste
     benzeno = Component(name='Benzeno', Tc=562.05, Pc=48.95e5, omega=0.21030)
     tolueno = Component(name='Tolueno', Tc=591.75, Pc=41.08e5, omega=0.26401)
+    metano = Component(name='Methane', Tc=190.6, Pc=45.99e5, omega=0.012)    
+    dioxide = Component(name='Carbon Dioxide', Tc=304.2, Pc=73.83e5, omega=0.224)
+    nitrogenio = Component(name='Nitrogen', Tc=126.00, Pc=34.00e5, omega=0.038)
     # 2. Instancia a mistura
-    mixture = Mixture([benzeno, tolueno], k_ij=0.0, l_ij=0.0)
+    k_ij = 0.093
+    k_ij = np.array([[0, k_ij],[k_ij,0]])
+    mixture = Mixture([metano, dioxide], k_ij=k_ij, l_ij=0.0)
 
     # 3. Condicoes do flash
-    T = 368.5 # K
-    P = 101325 # Pa
+    T = 200 # K
+    P = 30e5 # Pa
     z = np.array([0.5, 0.5])
-    x = np.array([0.36513879, 0.6348612])
-    y = np.array([0.57959251, 0.42040749])
-    trial_state = State(mixture=mixture, T=T, P=P, z=y, is_vapor=True)
-
-    # 
-    pr_calc = ModeloPengRobinson()
-    pr_calc.calculate_state(state=trial_state)
-    print(trial_state.Z)
+    trial_state = State(mixture=mixture, T=T, z=z, is_vapor=True)

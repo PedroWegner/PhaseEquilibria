@@ -1,4 +1,4 @@
-from new_code import *
+from CubicEoS_module import *
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -147,12 +147,12 @@ if __name__ == '__main__':
     k_ij = np.array([[0, 0.093],[0.093, 0]])
     
     # 2. Cria a mistura
-    mixture = Mixture([metano, dioxide], k_ij=k_ij, l_ij=0.0)
+    mixture = Mixture([metano], k_ij=0.0, l_ij=0.0)
 
     # 3. Instancia uma calculadora
     Pressure_calculator = PressureSatEngine(mixture=mixture, EoSEgine=ModeloPengRobinson)
 
-    T = 260
+    T = 10
     P = 26e5
     x_space = np.linspace(0.0, 0.45, 100)
     y = np.array([0.02, 0.98])
