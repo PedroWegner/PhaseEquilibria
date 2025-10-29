@@ -2,10 +2,9 @@ from CubicEoS_module import *
 import numpy as np
 from scipy.optimize import minimize, brentq
 import matplotlib.pyplot as plt
-# import numdifftools as nd
+import numdifftools as nd
 from time import time
 import copy
-
 class tpdCalculator:
     def __init__(self, EoS_Engine):
         self.eos_engine = EoS_Engine()
@@ -185,7 +184,6 @@ class CriticalPointSolver:
         B = self._calculate_B_matrix(state=state)
         lambda1, u = self._calculate_eingen(B=B)
         c = self._calculate_c(u=u, state=state)
-
         return lambda1, c
     
     def _calculate_jacobian(self, state: State, spec_var_index: int) -> np.ndarray:
@@ -196,7 +194,7 @@ class CriticalPointSolver:
 
         # Defini a jacobiana
         num_com = len(state.z)
-        J = np.zeros((3,3), dtype=np.float64)  # PONTO DE APOIO
+        J = np.zeros((3,3), dtype=np.float64)
 
         # Pertubacao na composição
         state_z1_pos = copy.deepcopy(state) #self._copy_state(state=state)
@@ -237,7 +235,7 @@ class CriticalPointSolver:
         state_Vm_neg.Vm *= (1 - h_log)
         self.eos_engine.calculate_params(state=state_Vm_neg)
         self.eos_engine.calculate_state_2(state=state_Vm_neg)
-        
+
         # As derivadsa dos criterios
         # Calcula os critérios para cada estado perturbado
         b_z1_pos, c_z1_pos = self._get_criteria(state_z1_pos)
@@ -254,21 +252,13 @@ class CriticalPointSolver:
         J[1, 1] = (b_T_pos - b_T_neg) / (2 * h_log)       # ∂b/∂(ln T)
         J[1, 2] = (b_Vm_pos - b_Vm_neg) / (2 * h_log)     # ∂b/∂(ln Vm)
 
-        # J[1, 3] = 0   --------------------------> ponto de apoio
-
         # Preenche a segunda linha (derivadas de c)
         J[2, 0] = (c_z1_pos - c_z1_neg) / (2 * h_z1)      # ∂c/∂z₁
         J[2, 1] = (c_T_pos - c_T_neg) / (2 * h_log)       # ∂c/∂(ln T)
         J[2, 2] = (c_Vm_pos - c_Vm_neg) / (2 * h_log)     # ∂c/∂(ln Vm)
 
-        # J[2, 3] = 0  # --------------------------> ponto de apoio
-
-        # # PONTO DE APOIO   #--------------------------> ponto de apoio
-        # J[3, 0] = - (np.log(state_z1_pos.P) - np.log(state_z1_neg.P)) / (2 * h_z1)   #--------------------------> ponto de apoio
-        # J[3, 1] = - (np.log(state_T_pos.P) - np.log(state_T_neg.P)) / (2 * h_log)   #--------------------------> ponto de apoio
-        # J[3, 2] = - (np.log(state_Vm_pos.P) - np.log(state_Vm_neg.P)) / (2 * h_log)   #--------------------------> ponto de apoio
-        # J[3, 3] = 1   #--------------------------> ponto de apoio
-        # # FIM DO PONTO DE APOIO
+        # --- 4. LINHA DA ESPECIFICAÇÃO (g) ---
+        # A derivada da função de especificação g = X_s - S
         return J
 
     def _calculate_system_of_equations(self, variables: list, state_template: State, spec_var_index: int, S_target: float) -> list:
@@ -276,7 +266,7 @@ class CriticalPointSolver:
         Esta é a função que define o sistema a ser zerado.
         Ela recebe as variáveis [z₁, lnT, lnV] e retorna o vetor de erros [b, c, g].
         """
-        z1, lnT, lnV = variables  # lnP    --------------------------> ponto de apoio
+        z1, lnT, lnV = variables
         
         # Cria o estado atual para a iteração
         current_state = copy.deepcopy(state_template)
@@ -291,8 +281,7 @@ class CriticalPointSolver:
         # b, u = self._calculate_eingen(self._calculate_B_matrix(state=current_state))
         # c = self._calculate_c(u, current_state)
         b, c = self._get_criteria(state=current_state)
-        # f4 = lnP - np.log(current_state.P) #  --------------------------> ponto de apoio
-
+        
         # --- CÁLCULO CORRETO DE 'g' ---
         # Compara a variável correspondente do estado atual com o valor alvo 'S'.
         if spec_var_index == 0:
@@ -301,32 +290,27 @@ class CriticalPointSolver:
             g = np.log(current_state.T) - S_target
         elif spec_var_index == 2:
             g = np.log(current_state.Vm) - S_target
-        elif spec_var_index == 3:
-            g = 1 - S_target   # --------------------------> ponto de apoio
         else:
             # Segurança
             g = 0
 
         return np.array([g, b, c], dtype=np.float64)
 
+
     def _newton_solver(self, state_guess: State, spec_var_index: int, spec_var_value: float, max_iter: int=50, tol: float=1e-6):
         local_state = copy.deepcopy(state_guess)
 
         # Se vai ser temperatura ou volume molar, precisa empacotar num ln
-        if spec_var_index == 1 or spec_var_index == 2 or spec_var_index == 3:  # PONTO DE APOIO
+        if spec_var_index == 1 or spec_var_index == 2:
             S_target = np.log(spec_var_value)
         else:
             S_target = spec_var_value
 
-        if local_state.P is None:
-            self.eos_engine.calculate_params(state=local_state)
-            self.eos_engine.calculate_state_2(state=local_state)
+        X = np.array([local_state.z[0], np.log(local_state.T), np.log(local_state.Vm)])
 
-        X = np.array([
-            local_state.z[0],
-            np.log(local_state.T),
-            np.log(local_state.Vm),
-            ])
+        # print("--- Iniciando Solver de Newton para Ponto Único ---")
+        # print(f"Iteração | Norma de F")
+        # print("-" * 30)
 
         for i in range(max_iter):
             F = self._calculate_system_of_equations(variables=X, state_template=local_state, spec_var_index=spec_var_index, S_target=S_target)
@@ -339,24 +323,22 @@ class CriticalPointSolver:
 
             # Verifica a convergência
             norm_F = np.linalg.norm(F)
-            print(F)
             if norm_F < tol:
-                # 
+                # print("-" * 30)
                 # print(f"Convergência atingida em {i+1} iterações, sendo X = {X}")
                 print(f"{i:<8} | {norm_F:.3e}, {local_state.z[0]}, {local_state.T -273.15}, {local_state.P /10**5}, {local_state.Z} ,{local_state.Vm}")
 
                 # Retorna o último estado consistente calculado dentro de _system_of_equations
                 return local_state, X, i+1
 
-            J = self._calculate_jacobian(state=local_state, spec_var_index=spec_var_index)
+            J = self._calculate_jacobian(state=local_state, spec_var_index=spec_var_index) 
             delta_X = np.linalg.solve(J, -F)
-
             X = X + delta_X
         return None, None, None
     
     def _calculate_sensitivity_vector(self, state: State, spec_var_index: int):
         J = self._calculate_jacobian(state=state, spec_var_index=spec_var_index)
-        F = np.zeros(3)  #   --------------------------> ponto de apoio
+        F = np.zeros(3)
         F[spec_var_index] = -1
 
         dX_dS = np.linalg.solve(J, -F)
@@ -366,18 +348,19 @@ class CriticalPointSolver:
 
     def _calculate_next_step(self, state: State, spec_var_index: int, X: np.ndarray, iter_newton: int):
         dX_dS = self._calculate_sensitivity_vector(state=state, spec_var_index=spec_var_index)
+
         delta_S = 0.001
-        delta_S_max = 0.05
-        if iter_newton <= 3:
-            delta_S = min(delta_S*1.25, delta_S_max)
-        elif iter_newton >= 5:
-            delta_S = delta_S / 2
-
+        # delta_S_max = 0.05
         # if iter_newton <= 3:
-        #     delta_S = 0.00075
+        #     delta_S = min(delta_S*1.25, delta_S_max)
         # elif iter_newton >= 5:
-        #     delta_S = 0.000075
+        #     delta_S = delta_S / 2
 
+        if iter_newton <= 3:
+            delta_S = 0.0075
+        elif iter_newton >= 5:
+            delta_S = 0.00075
+        
         X = X + dX_dS * delta_S
         spec_var_index_new = np.argmax(np.abs(dX_dS))
 
@@ -385,30 +368,30 @@ class CriticalPointSolver:
 
         if spec_var_index_new == 1 or spec_var_index_new == 2:
             spec_var_value_new = np.exp(spec_var_value_new)
+        # print("novo X=", X)
+        # print("novo spec_i=", spec_var_index_new)
+        # print("novo spec_v=", spec_var_value_new)
         return X, spec_var_index_new, spec_var_value_new
 
     def _get_PTVm(self, state: State) -> tuple:
         PTVm = np.array([state.T - 273.15, state.P / 10**5, state.Vm]) # [ºC, bar, mol m-3]
         return PTVm
 
-    def calcula_2(self, state: State, spec_var_index: int=0, spec_var_value: float=0.001) -> tuple:
-        """
-        index = 0 -> variavel especificada é a composicao
-        index = 1 -> variavel especificada é temperatura
-        index = 2 -> variavel especificada é o volume molar
-        """
+    def calcula_2(self, state: State) -> tuple:
         PTVm = []
         current_state = copy.deepcopy(state)
-        
+        spec_var_index = 0 # Primeiro ponto sempre será a composição do componente com Tc superior
+        spec_var_value = 0.001
 
         for ponto_idx in range(5000):
             converged_state, X_old, iter_newton = self._newton_solver(state_guess=current_state, spec_var_index=spec_var_index, spec_var_value=spec_var_value)
+            
             if converged_state is None:
                 print('possivelmente um ponto criondenbar!')
                 break
 
             PTVm.append(self._get_PTVm(state=converged_state))
-            if converged_state.z[0] >= 0.99 or converged_state.P > 2e9: # Pressão em bar
+            if converged_state.z[0] >= 0.99 or converged_state.P > 500e5: # Pressão em bar
                 print("Condição de parada da linha atingida.")
                 break
 
@@ -421,7 +404,7 @@ class CriticalPointSolver:
 
             spec_var_index = spec_var_index_new
             spec_var_value = spec_var_value_new
-
+            
             current_state.z = np.array([X_new[0], 1 - X_new[0]])
             current_state.T = np.exp(X_new[1])
             current_state.Vm = np.exp(X_new[2])
@@ -453,7 +436,7 @@ class HighPressurCriticalLineSolver:
 
         return lambda_min
     
-    def _find_unstable_state(self, state_template: State, P: float=2e8, T: float=300):
+    def _find_unstable_state(self, state_template: State, P: float=1e8, T: float=300):
         z_range = np.linspace(0.001, 0.999, 50)
         min_lambda_overall = float('inf')
         z1_s = -1
@@ -465,6 +448,7 @@ class HighPressurCriticalLineSolver:
             current_state.T = T
             Z = min(self.eos_engine._get_Z(state=current_state))
             self.eos_engine.calculate_state_3(state=current_state, Z=Z)
+
             lambda_val = self._get_min_eigenvalue_TP(state=current_state)
             if lambda_val < min_lambda_overall:
                 min_lambda_overall = lambda_val
@@ -486,69 +470,15 @@ class HighPressurCriticalLineSolver:
 
         try: 
             T_crit = brentq(f=lambda_as_function_of_T, a=T_search[0], b=T_search[1], xtol=1e-6)
-            final_state = copy.deepcopy(state_template)
-            final_state.z = z_s
-            final_state.P = P
-            final_state.T = T_crit
-            Z_crit = min(self.eos_engine._get_Z(state=final_state))
-            return T_crit, (Z_crit * 8.314 * T_crit / P)
+            return T_crit
         except ValueError:
             print('não achou nada')
             return None
-
-    def _refine_T_crit_search(self, state_template: State, P: float, T_init: float) -> tuple:
-        T_guess = T_init
-
-        for i in range(5):
-            z1_s, lambda_min = self._find_unstable_state(state_template=state_template, P=P, T=T_guess)
-
-            z_guess = np.array([z1_s, 1 - z1_s])
-            T_crit, Vm_crit = self._find_critical_temperature(state_template=state_template, z_s=z_guess, P=P, T_search=(150, T_guess+50))
-
-            if T_crit is None:
-                print('Refinamento falhou')
-                return None, None
-            
-            T_guess = T_crit
-
-
-        T_final_guess = T_guess
-        z_final_guess = z_guess
-        Vm_final_guess =  Vm_crit
-
-        return T_final_guess, z_final_guess, Vm_final_guess
-
-    def _obtain_state(self, n: np.ndarray, state: State) -> State:
-        state_local = copy.deepcopy(state) #
-        state_local.n = np.sum(n)
-        state_local.z = n / np.sum(n)
-        state_local.Vm = state_local.V / state_local.n
-        self.eos_engine.calculate_params(state=state_local)
-        self.eos_engine.calculate_state_2(state=state_local)
-        return state_local
-
-    def _calculate_c(self, u:np.ndarray, state: State, eta: float=0.0001):
-        delta = eta * u * np.sqrt(state.z)
-        n_pos = state.z + delta
-        state_pos = self._obtain_state(n=n_pos, state=state)
-        B_pos = self._calculate_B_matrix(state=state_pos)
-        lambda1_pos, _ = self._calculate_eingen(B=B_pos)
-
-        n_neg = state.z - delta
-        state_neg = self._obtain_state(n=n_neg, state=state)
-        B_neg = self._calculate_B_matrix(state=state_neg)
-        lambda1_neg, _ = self._calculate_eingen(B=B_neg)
-        
-        c = (lambda1_pos - lambda1_neg) / (2 * eta)
-        return c
-
-
 
 
     def calcula(self, state: State):
         lambda_min = self._get_min_eigenvalue_TP(state=state)
         print(lambda_min)
-
 
 
 class tester:
@@ -598,33 +528,11 @@ if __name__ == '__main__':
     mixture = Mixture([metano, sulfeto], k_ij=k_ij, l_ij=0.0)
     z = np.array([0.001, 0.999])
     trial_state = State(mixture=mixture, T=280, P=25e5, z=z, is_vapor=True, n=1.0)
-    state_test = copy.deepcopy(trial_state)
 
-
-    PR = ModeloPengRobinson()
-    critical_calc = CriticalPointSolver(EoS_Engine=ModeloPengRobinson)
+    # critical_calc = CriticalPointSolver(EoS_Engine=ModeloPengRobinson)
     # critical_calc.initial_guess(state=trial_state)
     high_pressure_calculator = HighPressurCriticalLineSolver(EoS_Engine=ModeloPengRobinson)
-    T, z_s_vector, Vm = high_pressure_calculator._refine_T_crit_search(state_template=trial_state, P=2e8, T_init=300)  
-    print(T, z_s_vector, Vm) 
-
-    
-    state_test.T = T
-    state_test.z = z_s_vector
-    state_test.Vm = Vm
-
-
-    local_state, X, i= critical_calc._newton_solver(state_guess=state_test, spec_var_index=2, spec_var_value=Vm*1.01)
-    print(X)
-    second_state = copy.deepcopy(trial_state)
-    second_state.z = np.array([X[0], 1 - X[0]])
-    second_state.T = np.exp(X[1])
-    second_state.Vm = np.exp(X[2])
-    print(second_state)
-    # vetor_sensibildiade = critical_calc._calculate_sensitivity_vector(state=local_state, spec_var_index=2)
-    # X, spec_var_index_new, spec_var_value_new = critical_calc._calculate_next_step(state=local_state, spec_var_index=2, X=X, iter_newton=i)
-    # print(X[0])
-    # print(np.exp(X[1]) - 273)
-    # print(np.exp(X[2]))
-
-    PVTm = critical_calc.calcula_2(state=second_state, spec_var_index=0, spec_var_value=X[0])
+    z_s, _ = high_pressure_calculator._find_unstable_state(state_template=trial_state)
+    z_s_vector = np.array([z_s, 1 - z_s])
+    T_critica_estimada = high_pressure_calculator._find_critical_temperature(state_template=trial_state, z_s=z_s_vector, P=1e8, T_search=[150, 300])
+    print(T_critica_estimada)

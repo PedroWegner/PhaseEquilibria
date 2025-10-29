@@ -22,13 +22,14 @@ class Mixture:
 class State:
     mixture: Mixture
     z: np.ndarray
-    is_vapor: bool
+    is_vapor: bool # PONTO DE APOIO, LOGO PODEREI DELETAR ISSO
     T: float
     P: Optional[float] = None
     Z: Optional[float] = None
     Vm: Optional[float] = None
     V: Optional[float] = None
     n: float = 100
+    core_model: Optional[Dict[str, any]] = None
     helmholtz_derivatives: Optional[Dict[str, any]] = None
     P_derivatives: Optional[Dict[str, any]] = None
     fugacity_dict: Optional[Dict[str, any]] = None
@@ -197,13 +198,13 @@ class SolveZWorker:
         Z = [r.real for r in Z if np.isclose(r.imag, 0) and r.real > 0]
         return sorted(Z)
 
-    def get_Z_(self, state: State) -> tuple:
+    def get_Z(self, state: State) -> tuple:
         A = state.params['a_mix'] * state.P / (RGAS_SI * state.T)**2
         B = state.params['b_mix'] * state.P / (RGAS_SI * state.T)
         Z = self._solver_Z(A=A, B=B)
         return Z
 
-    def get_Z(self, state: State, params) -> tuple:
+    def get_Z_(self, state: State, params) -> tuple:
         state = state
         # print(state.params)
         A = params['a_mix'] * state.P / (RGAS_SI * state.T)**2
@@ -228,7 +229,6 @@ class CubicCoreModelWorker:
         self.delta2 = delta2
 
         self._core_model = {}
-        
 
     def _calculate_F(self, state: State, D: float) -> None:
         f =self._core_model['f'] 
@@ -287,10 +287,10 @@ class CubicCoreModelWorker:
         self._core_model['gBV'] = 1 / (state.V - B)**2
         self._core_model['gBB'] = - 1 / (state.V - B)**2
 
-    def core_model_to_dict(self, state: State, params: Dict[str, any]) -> Dict[str, any]:
+    def core_model_to_dict(self, state: State) -> Dict[str, any]:
         self._core_model = {}
-        B = params['b_mix'] * state.n
-        D = params['a_mix'] * state.n**2
+        B = state.params['b_mix'] * state.n
+        D = state.params['a_mix'] * state.n**2
         self._calculate_f_functions(state=state, B=B)
         self._calculate_g_functions(state=state, B=B)
         self._calculate_F(state=state, D=D)
@@ -339,7 +339,9 @@ class CubicHelmholtzDerivativesWorker:
         self.derivatives['dF_dTV'] = FTV + FDV * DT
         self.derivatives['dF_dVV'] = FVV
     
-    def helmholtz_derivatives_to_dict(self, params: Dict[str, any], core_model: Dict[str, float]) -> Dict[str, any]:
+    def helmholtz_derivatives_to_dict(self, state: State) -> Dict[str, any]:
+        params = state.params
+        core_model = state.core_model
         self.derivatives = {}
         self._calculate_F_parcial_derivatives(params=params, core_model=core_model)
         return self.derivatives
@@ -485,16 +487,51 @@ class TestDerivativesEngine:
         self._test_temperature_derivatives(state=state)
         self._second_derivatives(state=state)
 
-class ModeloPengRobinson: #essa classe pode ser quebrada para adotar outras EoS cubicas!!!!
-    def __init__(self):
-        # 1. Parametros universais do modelo de Peng-Robinson
-        self.delta1 = 1 + np.sqrt(2)
-        self.delta2 = 1 - np.sqrt(2)
-        self.omega1 = 0.45724
-        self.omega2 = 0.07780
-        self.m_func = lambda omega: 0.37464 + 1.54226 * omega - 0.26992 * omega**2
 
-        # Inicializando os workers da classe
+class EquationOfState(ABC):
+    """
+    This is a abstract class which implements a equation of state. It is a stateless abstract class
+    """
+    # @abstractmethod
+    # def get_eos_params(self, state: State): pass PONTO DE APOIO, posso deletar isso, porque eu implementarei nos workers
+
+    @abstractmethod
+    def calculate_pressure(self, state: State) -> None: pass
+
+    @abstractmethod
+    def calculate_from_TP(self, state: State, is_vapor: bool) -> None: pass
+
+    @abstractmethod
+    def calculate_fugacity(self, state: State) -> None: pass
+
+    def calculate_from_TVm(self, state: State) -> None:
+        """
+        This method is the same for any equation of state, the only thing would change is the pressure calculate method
+        For using this function, the user must input temperature end molar volume
+        """
+        if state.T is None or state.Vm is None:
+            raise ValueError('Temperature (T) or Molar Volume (Vm) is None')
+        
+        # It utilises the abstract method to calculate the parameters of eos
+        state.params = self.get_eos_params(state=State)
+
+        state.P = self.calculate_pressure(state=State)
+        state.Z = state.P * state.Vm / (RGAS_SI * state.T) # PONTO DE APOIO, talvez seja necessario criar uma outra logica do R_nSI
+        state.V = state.Vm * state.n
+
+    def get_Z(self, state: State) -> float:
+        if state.Z is None:
+            raise ValueError('You must run a method to calculate the compressibility before')
+        return state.Z
+
+class CubicEquationOfState(EquationOfState):
+    def __init__(self, delta1: float, delta2: float, omega1: float, omega2: float, m_func: callable):
+        self.delta1 = delta1
+        self.delta2 = delta2
+        self.omega1 = omega1
+        self.omega2 = omega2
+        self.m_func = m_func
+
         self.params_worker = CubicParametersWorker(omega1=self.omega1, omega2=self.omega2, m=self.m_func)
         self.solver_Z_worker = SolveZWorker(delta1=self.delta1, delta2=self.delta2)
         self.core_model_worker =  CubicCoreModelWorker(delta1=self.delta1, delta2=self.delta2)
@@ -502,97 +539,148 @@ class ModeloPengRobinson: #essa classe pode ser quebrada para adotar outras EoS 
         self.pression_derivatives_worker = PressionDerivativesWorker()
         self.fugacity_worker = FugacityWorker()
         self.residual_props_worker = ResidualPropertiesWorker()
-
-    def calculate_state(self, state: State) -> None:
-        # Worker especifico da Strategy
-        params = self.params_worker.params_to_dict(state=state)
-        state.params = params
-
-        Z, is_vapor = self.solver_Z_worker.get_Z(state=state, params=params) # ponto de apoio
-        state.is_vapor = is_vapor
-        if state.is_vapor:
+        
+    # All the abstract methods are constructed below
+    def calculate_from_TP(self, state: State, is_vapor: bool) -> None:
+        if state.T is None or state.P is None:
+            raise ValueError('Temperature and Pressure must be inputed to use this method')
+        
+        state.params = self.params_worker.params_to_dict(state=state)
+        Z = self.solver_Z_worker.get_Z(state=state) # PONTO DE APOIO, eu preciso mudar o solver_Z, porque cada eos tem um solver diferente.....
+        if is_vapor:
             state.Z = max(Z)
-        else:
+        else: 
             state.Z = min(Z)
+
         state.Vm = state.Z * RGAS_SI * state.T / state.P
         state.V = state.Vm * state.n
-
-        core_model = self.core_model_worker.core_model_to_dict(state=state, params=params) # ponto de apoio
-
-        state.helmholtz_derivatives = self.helmholtz_derivatives_worker.helmholtz_derivatives_to_dict(params=params, core_model=core_model)
+    
+    def calculate_fugacity(self, state: State) -> None:
+        if state.Z is None:
+            raise ValueError('The thermodynamic state was not calculated, there is no value for compressibility')
+        
+        state.core_model = self.core_model_worker.core_model_to_dict(state=state)
+        state.helmholtz_derivatives = self.helmholtz_derivatives_worker.helmholtz_derivatives_to_dict(state=state)
         state.P_derivatives = self.pression_derivatives_worker.P_derivatives_to_dict(state=state)
         state.fugacity_dict = self.fugacity_worker.fugacity_to_dict(state=state)
-        state.residual_props = self.residual_props_worker.residual_props_to_dict(state=state, core_model=core_model)
-
-    def calculate_params(self, state: State) -> None:
+        pass
+    
+    def calculate_pressure(self, state: State) -> None:
+        if state.T is None or state.Vm is None:
+            raise ValueError('Temperature (T) and Molar Volume (Vm) must be different from None') 
+        
         state.params = self.params_worker.params_to_dict(state=state)
-
-    def calculate_state_2(self, state: State) -> None:
-        # params = self.params_worker.params_to_dict(state=state)
-        # state.params
-        # state.Vm = 4 * params['b_mix']
-        Vm = state.Vm
-        T = state.T
         b = state.params['b_mix']
         a = state.params['a_mix']
 
-        P = RGAS_SI * T / (Vm - b) - a / ((Vm + self.delta1 * b) * (Vm + self.delta2 * b))
-        state.P = P
-        Z = P * Vm / (RGAS_SI * T)
-        state.Z = Z
-        state.V = state.Vm * state.n
-        core_model = self.core_model_worker.core_model_to_dict(state=state, params=state.params)
+        state.P = RGAS_SI * state.T / (state.Vm - b) - a / ((state.Vm + self.delta1 * b) * (state.Vm + self.delta2 * b))
+    # All the abstract methods are constructed above
 
-        state.helmholtz_derivatives = self.helmholtz_derivatives_worker.helmholtz_derivatives_to_dict(params=state.params, core_model=core_model)
-        state.P_derivatives = self.pression_derivatives_worker.P_derivatives_to_dict(state=state)
-        state.fugacity_dict = self.fugacity_worker.fugacity_to_dict(state=state)
-        state.residual_props = self.residual_props_worker.residual_props_to_dict(state=state, core_model=core_model)
+class PengRobinson(CubicEquationOfState): 
+    def __init__(self):
+        super().__init__(
+            delta1 = 1 + np.sqrt(2),
+            delta2 = 1 - np.sqrt(2),
+            omega1 = 0.45724,
+            omega2 = 0.07780,
+            m_func = lambda omega: 0.37464 + 1.54226 * omega - 0.26992 * omega**2
+        )
+
+class SoaveRedlichKwong(CubicEquationOfState): 
+    def __init__(self):
+        super().__init__(
+            delta1 = 1,
+            delta2 = 0,
+            omega1 = 0.42748,
+            omega2 = 0.08664,
+            m_func = lambda omega: 0.480 + 1.574 * omega - 0.176 * omega**2
+        )
+
+class VanDerWaals(CubicEquationOfState): 
+    def __init__(self):
+        super().__init__(
+            delta1 = 0,
+            delta2 = 0,
+            omega1 = 27/64,
+            omega2 = 1/8,
+            m_func = lambda omega: 0
+        )
+
+class RedlichKwong(CubicEquationOfState): 
+    """
+    PARA IMPLEMENTAR REDLICH KWONG, PRECISO ALTERAR AS FUNCOES DE DERIVADAS DOS PARAMETROS BINARIOS
+    """
+    def __init__(self):
+        super().__init__(
+            delta1 = 1,
+            delta2 = 0,
+            omega1 = 0.42748,
+            omega2 = 0.08664,
+            m_func = lambda omega: 0 # PONTO DE APOIO, implementado errado!!!!!
+        )
 
 
+class EoSFactory:
+    @staticmethod
+    def get_eos_model(model_name: str) -> EquationOfState:
+        normalized_name = model_name.strip().upper()
 
-    def _get_Z(self, state: State) -> np.ndarray:
-        params = self.params_worker.params_to_dict(state=state)
-        state.params = params
-        Z = self.solver_Z_worker.get_Z_(state=state) # ponto de apoio
-        return Z
-
-    def calculate_state_3(self, state: State, Z: np.ndarray) -> None:
-        state.Z = Z
-        # if state.is_vapor:
-        #     state.Z = max(Z)
-        # else:
-        #     state.Z = min(Z)
-        state.Vm = state.Z * RGAS_SI * state.T / state.P
-        state.V = state.Vm * state.n
-
-        core_model = self.core_model_worker.core_model_to_dict(state=state, params=state.params) # ponto de apoio
-
-        state.helmholtz_derivatives = self.helmholtz_derivatives_worker.helmholtz_derivatives_to_dict(params=state.params, core_model=core_model)
-        state.P_derivatives = self.pression_derivatives_worker.P_derivatives_to_dict(state=state)
-        state.fugacity_dict = self.fugacity_worker.fugacity_to_dict(state=state)
-        state.residual_props = self.residual_props_worker.residual_props_to_dict(state=state, core_model=core_model)
+        if normalized_name in ("PENG-ROBINSON", "PENGROBINSON", "PR"):
+            return PengRobinson()
         
+        if normalized_name in ("SOAVE-REDLICH-KWONG", "SOAVEREDLICHKWONG", "SRK"):
+            return SoaveRedlichKwong()
 
+        if normalized_name in ('VAN DER WAALS', 'VDW'):
+            return VanDerWaals()
         
+        if normalized_name in ("REDLICH-KWONG", "REDLICHKWONG", "RK"):
+            raise NotImplementedError('Redlich-Kwong is not implemented yet')
+        
+        raise ValueError(f"The model {model_name} is not implemented")
 
 if __name__ == '__main__':
     # 1. Instancia os componentes teste
     benzeno = Component(name='Benzeno', Tc=562.05, Pc=48.95e5, omega=0.21030)
     tolueno = Component(name='Tolueno', Tc=591.75, Pc=41.08e5, omega=0.26401)
     metano = Component(name='Methane', Tc=190.6, Pc=45.99e5, omega=0.012)    
+    butano = Component(name='Methane', Tc=425.1, Pc=37.96e5, omega=0.200)    
     dioxide = Component(name='Carbon Dioxide', Tc=304.2, Pc=73.83e5, omega=0.224)
     nitrogenio = Component(name='Nitrogen', Tc=126.00, Pc=34.00e5, omega=0.038)
     # 2. Instancia a mistura
     k_ij = 0.093
     k_ij = np.array([[0, k_ij],[k_ij,0]])
-    mixture = Mixture([metano, nitrogenio], k_ij=0.0, l_ij=0.0)
+    mixture = Mixture([metano], k_ij=0.0, l_ij=0.0)
 
     # 3. Condicoes do flash
     T = 200 # K
     P = 30e5 # Pa
-    z = np.array([0.6, 0.4])
+    z = np.array([1.0])
     trial_state = State(mixture=mixture, T=T, P=P, z=z, is_vapor=True)
     
-    calc_peng_robinson = ModeloPengRobinson()
-    Z = calc_peng_robinson._get_Z(state=trial_state)
+    eos_factory = EoSFactory()
+    model_name = "PR"
+    eos_model = eos_factory.get_eos_model(model_name=model_name)
+    print(type(eos_model))
+    
+
+    T = 350 # K
+    P = 9.4573e5 # Pa
+    z = np.array([1.0])
+    trial_mixture = Mixture([butano], k_ij=0.0, l_ij=0.0)
+    trial_state = State(mixture=trial_mixture, T=T, P=P, z=z, is_vapor=None)
+    eos_model.calculate_from_TP(state=trial_state, is_vapor=True)
+    print(trial_state.Vm * 100**3)
+    Z = eos_model.get_Z(state=trial_state)
     print(Z)
+
+    T = 200 # K
+    P = 30e5 # Pa
+    z = np.array([0.6, 0.4])
+    trial_mixture = Mixture([metano, nitrogenio], k_ij=0.0, l_ij=0.0)
+    trial_state = State(mixture=trial_mixture, T=T, P=P, z=z, is_vapor=None)
+    eos_model.calculate_from_TP(state=trial_state, is_vapor=True)
+    Z = eos_model.get_Z(state=trial_state)
+    eos_model.calculate_fugacity(state=trial_state)
+    print(Z)
+    print(trial_state.fugacity_dict['phi'])

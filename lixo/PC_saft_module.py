@@ -16,7 +16,7 @@ saft_b2 = np.array([0.097688312, -0.255757498, -9.155856153, 20.64207597, -38.80
 K_boltz = 1.380649e-23 # m2 kg s-2 K-1
 N_Avogrado = 6.02214076e23 # mol-1
 R = K_boltz * N_Avogrado # J mol-1 K-1
-
+#Teste
 class PC_saft_state():
     def __init__(self,
                 T: float,
@@ -68,6 +68,7 @@ class PC_saft_state():
         self.s_ij = np.zeros((self.ncomp, self.ncomp))
         self.e_ij = np.zeros((self.ncomp, self.ncomp))
         self.k_ij = np.zeros((self.ncomp, self.ncomp))
+        print(self.k_ij)
         self.grad_g_ij_rho = np.zeros((self.ncomp, self.ncomp))
 
         # ARRAYS PARA CALCULAR A FUGACIDADE
@@ -554,7 +555,7 @@ def update_test(state: PC_saft_state) -> None:
     if state.liquid:
         state.eta = 0.5
     else:
-        state.eta = 1e-10
+        state.eta = 1e-8
     for i in range(250):
         calc_state(state=state)
         P = calc_P(state=state)
@@ -566,7 +567,7 @@ def update_test(state: PC_saft_state) -> None:
 
         if np.abs(eta_old - state.eta) < 1e-10:
             break
-    print(i)
+
     # Atualiza o real estado do sistema com ehta convergido
     calc_state(state=state)
     calc_fugacity_coef(state=state)
@@ -628,7 +629,6 @@ def multichoose(n, k):
             for tail in multichoose(n - 1, k - i):
                 yield (i,) + tail
 
-from time import time
 
 if __name__ == "__main__":
     m =  [0.680, 1.0000]
@@ -640,106 +640,88 @@ if __name__ == "__main__":
     x_l = [x, 1 - x]
     y = 0.148
     y_l = [y, 1-y]
-    t0 = time()
-    m = [1.2053, 1.0000]
-    s = [3.3130, 3.7039]
-    e = [90.96, 150.03]
-    T = 200 
-    P = 30e5
-
-    m = [2.3316]
-    s = [3.7086]
-    e = [222.88]
-    T = 350 # K
-    P = 9.4573e5 # Pa
-    z = np.array([1.0])
-    state = PC_saft_state(T=T, P=P, ncomp=1, x=z, m=m, sigma=s, epsilon=e, liquid=False)
-    update_test(state=state)
-    tf = time()
-    print('tempo total: ', (tf - t0))
-    print(state.eta)
-    # liquid = PC_saft_state(T=T_o,
-    #                        P=P_o,
-    #                        ncomp=2,
-    #                        x=x_l,
-    #                        m=m,
-    #                        sigma=s,
-    #                        epsilon=e,
-    #                        liquid=True)
+    liquid = PC_saft_state(T=T_o,
+                           P=P_o,
+                           ncomp=2,
+                           x=x_l,
+                           m=m,
+                           sigma=s,
+                           epsilon=e,
+                           liquid=True)
 
 
-    # gas = PC_saft_state(T=T_o,
-    #                     P=P_o,
-    #                     ncomp=2,
-    #                     x=y_l,
-    #                     m=m,
-    #                     sigma=s,
-    #                     epsilon=e,
-    #                     liquid=False)
-    # # k_ij = -0.06
-    # # liquid.k_ij[0][1] = k_ij
-    # # gas.k_ij[0][1] = k_ij
-    # # liquid.k_ij[1][0] = k_ij
-    # # gas.k_ij[1][0] = k_ij
-    # fractions_matrix = np.array(generate_mole_fractions(n=2, num_points=225))
-    # # fractions_matrix = fractions_matrix[fractions_matrix[:,0] >= 0.0001]
-    # fractions_matrix = fractions_matrix[fractions_matrix[:,0] <= 0.30]
-    # print(fractions_matrix)
-    # P_o = 30e5
-    # x_space = []
-    # y_space = []
-    # P_space = []
-    # for x in fractions_matrix:
-    #     liquid.x = np.array(x)
-    #     P_o = minimize(fun=res_K, x0=P_o, args=(liquid, gas), method='Nelder-Mead').x[0]
-    #     x_space.append(liquid.x[0])
-    #     y_space.append(gas.x[0])
-    #     P_space.append(P_o * 1e-5)
-    #     print(liquid.x[0], gas.x[0], P_o*1e-5)
+    gas = PC_saft_state(T=T_o,
+                        P=P_o,
+                        ncomp=2,
+                        x=y_l,
+                        m=m,
+                        sigma=s,
+                        epsilon=e,
+                        liquid=False)
+    # k_ij = -0.06
+    # liquid.k_ij[0][1] = k_ij
+    # gas.k_ij[0][1] = k_ij
+    # liquid.k_ij[1][0] = k_ij
+    # gas.k_ij[1][0] = k_ij
+    fractions_matrix = np.array(generate_mole_fractions(n=2, num_points=225))
+    # fractions_matrix = fractions_matrix[fractions_matrix[:,0] >= 0.0001]
+    fractions_matrix = fractions_matrix[fractions_matrix[:,0] <= 0.30]
+    print(fractions_matrix)
+    P_o = 30e5
+    x_space = []
+    y_space = []
+    P_space = []
+    for x in fractions_matrix:
+        liquid.x = np.array(x)
+        P_o = minimize(fun=res_K, x0=P_o, args=(liquid, gas), method='Nelder-Mead').x[0]
+        x_space.append(liquid.x[0])
+        y_space.append(gas.x[0])
+        P_space.append(P_o * 1e-5)
+        print(liquid.x[0], gas.x[0], P_o*1e-5)
 
-    # # wb = pyxl.Workbook()
-    # # st = wb.active
-    # # st['A1'] = 'P_exp'
-    # # st['B1'] = 'x_exp'
-    # # st['C1'] = 'y_exp'
-    # # for i in range(len(x_space)):
-    # #     st[f'A{i + 2}'] = P_space[i]
-    # #     st[f'B{i + 2}'] = x_space[i]
-    # #     st[f'C{i + 2}'] = y_space[i]
+    # wb = pyxl.Workbook()
+    # st = wb.active
+    # st['A1'] = 'P_exp'
+    # st['B1'] = 'x_exp'
+    # st['C1'] = 'y_exp'
+    # for i in range(len(x_space)):
+    #     st[f'A{i + 2}'] = P_space[i]
+    #     st[f'B{i + 2}'] = x_space[i]
+    #     st[f'C{i + 2}'] = y_space[i]
     
-    # # wb.save((os.path.dirname(os.path.abspath(__file__)) + f'\\data\\methane_co2_{T_o}K_kij={k_ij}.xlsx'))
+    # wb.save((os.path.dirname(os.path.abspath(__file__)) + f'\\data\\methane_co2_{T_o}K_kij={k_ij}.xlsx'))
         
         
-    # # P_exp = [130.779896, 127.6256499,123.9861352, 120.5892548, 117.1923744,110.1559792, 103.3622184,
-    # #           96.32582322, 86.13518198, 82.73830156, 68.90814558, 55.0779896, 41.24783362, 34.21143847,
-    # #           27.66031196, 20.62391681, 14.07279029, 10.43327556, 7.279029463, 5.82322357, 4.610051993]
-    # # x_exp = [0.703549061,0.645093946, 0.613778706, 0.586638831, 0.557411273, 0.519832985, 0.482254697, 0.446764092,
-    # #         0.400835073, 0.382045929, 0.315240084, 0.252609603, 0.183716075, 0.150313152, 0.118997912, 0.08559499,
-    # #         0.052192067, 0.033402923, 0.014613779, 0.008350731, 0.004175365,]
-    # # y_exp = [0.770354906, 0.805845511, 0.82045929, 0.835073069, 0.845511482, 0.855949896, 0.866388309, 0.87473904,
-    # #           0.881002088, 0.881002088, 0.881002088, 0.876826722, 0.860125261, 0.8434238, 0.822546973, 0.780793319,
-    # #           0.699373695, 0.622129436, 0.455114823, 0.331941545, 0.131524008]
-    # # critical_p = [0.722]
-    # # critical_P = [131.99]
-    # P_exp = [ 35.2,40.1,59.9,70.1,80.6,82.7,99.2,102,106.9]
-    # x_exp = [0.0168,0.0257,0.0709,0.0938,0.124,0.131,0.19,0.205,0.225]
-    # y_exp = [0.148,0.206,0.362,0.406,0.424,0.424,0.42,0.411,0.401]
+    # P_exp = [130.779896, 127.6256499,123.9861352, 120.5892548, 117.1923744,110.1559792, 103.3622184,
+    #           96.32582322, 86.13518198, 82.73830156, 68.90814558, 55.0779896, 41.24783362, 34.21143847,
+    #           27.66031196, 20.62391681, 14.07279029, 10.43327556, 7.279029463, 5.82322357, 4.610051993]
+    # x_exp = [0.703549061,0.645093946, 0.613778706, 0.586638831, 0.557411273, 0.519832985, 0.482254697, 0.446764092,
+    #         0.400835073, 0.382045929, 0.315240084, 0.252609603, 0.183716075, 0.150313152, 0.118997912, 0.08559499,
+    #         0.052192067, 0.033402923, 0.014613779, 0.008350731, 0.004175365,]
+    # y_exp = [0.770354906, 0.805845511, 0.82045929, 0.835073069, 0.845511482, 0.855949896, 0.866388309, 0.87473904,
+    #           0.881002088, 0.881002088, 0.881002088, 0.876826722, 0.860125261, 0.8434238, 0.822546973, 0.780793319,
+    #           0.699373695, 0.622129436, 0.455114823, 0.331941545, 0.131524008]
+    # critical_p = [0.722]
+    # critical_P = [131.99]
+    P_exp = [ 35.2,40.1,59.9,70.1,80.6,82.7,99.2,102,106.9]
+    x_exp = [0.0168,0.0257,0.0709,0.0938,0.124,0.131,0.19,0.205,0.225]
+    y_exp = [0.148,0.206,0.362,0.406,0.424,0.424,0.42,0.411,0.401]
 
-    # plt.figure(figsize=(5, 6))
-    # plt.rcParams['font.family'] = 'Arial'
-    # plt.rcParams['font.size'] = 12
-    # plt.rcParams['text.color'] = 'black'
-    # plt.plot(x_space, P_space, color='#333333', linewidth=0.8, label=f'PC-SAFT')
-    # plt.plot(y_space, P_space, color='#333333', linewidth=0.8)
-    # plt.scatter(x_exp, P_exp, marker='o', edgecolors='#333333', facecolor='none', linewidths=0.5, label='Experimental')
-    # plt.scatter(y_exp, P_exp, marker='o', edgecolors='#333333', facecolor='none', linewidths=0.5)
-    # # # # plt.scatter(critical_p, critical_P, marker='+', color='#333333', linewidths=0.5)
-    # plt.xlabel(r'$x_{H_{2}}\;\;y_{H_{2}}$')
-    # plt.ylabel(r'$P\;(bar)$')
-    # plt.ylim(bottom=0)
-    # plt.xlim(left=0)
-    # plt.legend()
-    # time_f = time()
-    # print(time_f - time_0)
+    plt.figure(figsize=(5, 6))
+    plt.rcParams['font.family'] = 'Arial'
+    plt.rcParams['font.size'] = 12
+    plt.rcParams['text.color'] = 'black'
+    plt.plot(x_space, P_space, color='#333333', linewidth=0.8, label=f'PC-SAFT')
+    plt.plot(y_space, P_space, color='#333333', linewidth=0.8)
+    plt.scatter(x_exp, P_exp, marker='o', edgecolors='#333333', facecolor='none', linewidths=0.5, label='Experimental')
+    plt.scatter(y_exp, P_exp, marker='o', edgecolors='#333333', facecolor='none', linewidths=0.5)
+    # # # plt.scatter(critical_p, critical_P, marker='+', color='#333333', linewidths=0.5)
+    plt.xlabel(r'$x_{H_{2}}\;\;y_{H_{2}}$')
+    plt.ylabel(r'$P\;(bar)$')
+    plt.ylim(bottom=0)
+    plt.xlim(left=0)
+    plt.legend()
+    time_f = time()
+    print(time_f - time_0)
 
-    # plt.show()
+    plt.show()

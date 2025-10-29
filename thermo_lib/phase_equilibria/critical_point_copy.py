@@ -1,105 +1,60 @@
-from CubicEoS_module import * 
+from ..eos.eos_abc import EquationOfState
+from ..state import State
+
 import numpy as np
-from scipy.optimize import minimize, brentq
-import matplotlib.pyplot as plt
-# import numdifftools as nd
-from time import time
 import copy
 
-class tpdCalculator:
-    def __init__(self, EoS_Engine):
-        self.eos_engine = EoS_Engine()
-        pass
+class StabilityCriteriaWorker:
+    def __init__(self, eos_model: EquationOfState):
+        self.eos_model = eos_model
+
+    @staticmethod
+    def _calculate_B_matrix(state: State) -> np.ndarray:
+        n_array = state.n * state.z
+        I = np.identity(len(state.mixture.components))
+        I = I / n_array
+        B = np.sqrt(np.outer(state.z, state.z)) * (I + state.helmholtz_derivatives['dF_dninj'])
+        return B
+
+    @staticmethod
+    def _calculate_eingen(B: float) -> tuple[float, float]:
+        eigenvalues, eigenvectors = np.linalg.eigh(B) # ponto de analise!!!!
+        min_eigenvalue_index = np.argmin(eigenvalues)
+        lambda1 = eigenvalues[min_eigenvalue_index]
+        u = eigenvectors[:, min_eigenvalue_index]
+        return lambda1, u
+
+    def _calculate_c(self, u: np.ndarray, state: State, eta: float=0.0001) -> float:
+        delta = eta * u * np.sqrt(state.z)
+        n_pos = state.z + delta
+        state_pos = self._obtain_state(n=n_pos, state=state)
+        B_pos = self._calculate_B_matrix(state=state_pos)
+        lambda1_pos, _ = self._calculate_eingen(B=B_pos)
+
+        n_neg = state.z - delta
+        state_neg = self._obtain_state(n=n_neg, state=state)
+        B_neg = self._calculate_B_matrix(state=state_neg)
+        lambda1_neg, _ = self._calculate_eingen(B=B_neg)
+        
+        c = (lambda1_pos - lambda1_neg) / (2 * eta)
+        return c
+
+    def _obtain_state(self, n: np.ndarray, state: State) -> State:
+        state_local = copy.deepcopy(state)
+        state_local.n = np.sum(n)
+        state_local.z = n / np.sum(n)
+        state_local.Vm = state_local.V / state_local.n
+        self.eos_model.calculate_from_TVm(state=state_local)
+        return state_local
     
-    def _calculate_tm(self, W: np.ndarray, state_local: State, di: np.ndarray) -> float:
-        z = W / np.sum(W)
-        state_local.z = z
-        self.eos_engine.calculate_state(state=state_local)
-        tm = 1 + np.sum(W * (np.log(W) + np.log(state_local.fugacity_dict['phi']) - (di + 1)))
+    def get_criteria(self, state: State) -> tuple[float, float]:
+        B = self._calculate_B_matrix(state=state)
+        lambda1, u = self._calculate_eingen(B=B)
+        c = self._calculate_c(u=u, state=state)
+        return lambda1, c
+    
 
-        return tm
-
-    def _get_initial_guess(self, state: State):
-        Pc = np.array([c.Pc for c in state.mixture.components])
-        Tc = np.array([c.Tc for c in state.mixture.components])
-        omega = np.array([c.omega for c in state.mixture.components])
-        K = (Pc / state.P) * np.exp(5.373 * (1 + omega) * (1 - Tc / state.T))
-        # estimativas inicias para fase vapor e liquida, teremos que testar as duas mesmo
-        y = K * state.z
-        x = state.z / K
-
-        y = y / np.sum(y)
-        x = x / np.sum(x)
-
-        return x, y 
-
-    def _calculate_g_hessian(self, W: np.ndarray, state_local: State, di: np.ndarray):
-        z = W / np.sum(W)
-        state_local.z = z
-
-        self.eos_engine.calculate_state(state=state_local)
-        I = np.identity(len(di))
-        gi = np.sqrt(W)*(np.log(W) + np.log(state_local.fugacity_dict['phi']) - di)
-
-        Hij = I + np.sqrt(np.outer(W, W)) * state_local.fugacity_dict['dlnphi_dni'] 
-        
-        return gi, Hij  
-
-    def _find_minimum(self, state_local: State, di: np.ndarray):
-        W0 = state_local.z
-        alpha_K = 2 * np.sqrt(W0)
-        S = np.identity(len(state_local.z))
-
-        for _ in range(30):
-            Wk = (alpha_K / 2)**2
-            gK, Hk = self._calculate_g_hessian(W=Wk, state_local=state_local, di=di)
-
-            if np.linalg.norm(gK) < 1e-6:
-                print('convergiu')
-                break
-
-            eta = 0.0
-            delta_alpha = 0.0
-            for _ in range(15):
-                H_mod = Hk + eta * S
-                try:
-                    delta_alpha = np.linalg.solve(H_mod, -gK)
-                    break
-                except np.linalg.LinAlgError:
-                    eta = eta*10 if eta > 0 else 1e-6
-            if delta_alpha is None:
-                print("deu ruim")
-
-            alpha_K += delta_alpha
-        
-        W = (alpha_K / 2)**2
-        tm = self._calculate_tm(W=W, state_local=state_local, di=di)
-        return W, tm
-
-    def _get_di(self, state: State):
-        di = np.log(state.z) + np.log(state.fugacity_dict['phi'])
-        return di
-
-    def check_stability(self, state: State):
-        x, y = self._get_initial_guess(state=state)
-        liq_state = State(mixture=state.mixture,
-                          T=state.T,
-                          P=state.P,
-                          z=x,
-                          is_vapor=False)
-        vap_state = State(mixture=state.mixture,
-                          T=state.T,
-                          P=state.P,
-                          z=y,
-                          is_vapor=True)
-        
-        di = self._get_di(state=state)
-
-        W_liq, tm_liq = self._find_minimum(state_local=liq_state, di=di)
-        W_vap, tm_vap = self._find_minimum(state_local=vap_state, di=di)
-
-        print(W_liq, W_liq/np.sum(W_liq), tm_liq)
-        print(W_vap, W_vap / np.sum(W_vap),tm_vap)
+    
 
 class CriticalPointSolver:
     def __init__(self, EoS_Engine: ModeloPengRobinson):
@@ -185,7 +140,6 @@ class CriticalPointSolver:
         B = self._calculate_B_matrix(state=state)
         lambda1, u = self._calculate_eingen(B=B)
         c = self._calculate_c(u=u, state=state)
-
         return lambda1, c
     
     def _calculate_jacobian(self, state: State, spec_var_index: int) -> np.ndarray:
@@ -291,6 +245,7 @@ class CriticalPointSolver:
         # b, u = self._calculate_eingen(self._calculate_B_matrix(state=current_state))
         # c = self._calculate_c(u, current_state)
         b, c = self._get_criteria(state=current_state)
+        
         # f4 = lnP - np.log(current_state.P) #  --------------------------> ponto de apoio
 
         # --- CÁLCULO CORRETO DE 'g' ---
@@ -339,7 +294,6 @@ class CriticalPointSolver:
 
             # Verifica a convergência
             norm_F = np.linalg.norm(F)
-            print(F)
             if norm_F < tol:
                 # 
                 # print(f"Convergência atingida em {i+1} iterações, sendo X = {X}")
@@ -428,203 +382,3 @@ class CriticalPointSolver:
             print(ponto_idx)
         return PTVm
     
-
-class HighPressurCriticalLineSolver:
-    def __init__(self, EoS_Engine: ModeloPengRobinson):
-        self.eos_engine = EoS_Engine()
-
-    def _calculate_B_matrix_PT(self, state: State):
-        # self.eos_engine.calculate_params(state=state)
-        # self.eos_engine.calculate_state_2(state=state)
-        I = np.identity(len(state.mixture.components))
-        B = I + np.sqrt(np.outer(state.z, state.z)) * state.fugacity_dict['dlnphi_dni']
-        return B
-
-    def _calculate_eingen(self, B: np.ndarray):
-        eigenvalues, eigenvectors = np.linalg.eigh(B)
-        min_eigenvalue_index = np.argmin(eigenvalues)
-        lambda1 = eigenvalues[min_eigenvalue_index]
-        u = eigenvectors[:, min_eigenvalue_index]
-        return lambda1, u
-    
-    def _get_min_eigenvalue_TP(self, state: State):
-        B = self._calculate_B_matrix_PT(state=state)
-        lambda_min, _ = self._calculate_eingen(B=B)
-
-        return lambda_min
-    
-    def _find_unstable_state(self, state_template: State, P: float=2e8, T: float=300):
-        z_range = np.linspace(0.001, 0.999, 50)
-        min_lambda_overall = float('inf')
-        z1_s = -1
-
-        for z1_test in z_range:
-            current_state = copy.deepcopy(state_template)
-            current_state.z = np.array([z1_test, 1 - z1_test])
-            current_state.P = P
-            current_state.T = T
-            Z = min(self.eos_engine._get_Z(state=current_state))
-            self.eos_engine.calculate_state_3(state=current_state, Z=Z)
-            lambda_val = self._get_min_eigenvalue_TP(state=current_state)
-            if lambda_val < min_lambda_overall:
-                min_lambda_overall = lambda_val
-                z1_s = z1_test
-
-        return z1_s, min_lambda_overall
-    
-    def _find_critical_temperature(self, state_template: State, z_s: np.ndarray, P: float, T_search: tuple):
-        def lambda_as_function_of_T(temp_K: float) -> float:
-            # Cria um estado com a T variável e z, P fixos
-            current_state = copy.deepcopy(state_template)
-            current_state.z = z_s
-            current_state.T = temp_K
-            current_state.P = P
-            Z = min(self.eos_engine._get_Z(state=current_state))
-            self.eos_engine.calculate_state_3(state=current_state, Z=Z)
-            # Retorna o autovalor mínimo para esta temperatura
-            return self._get_min_eigenvalue_TP(state=current_state)
-
-        try: 
-            T_crit = brentq(f=lambda_as_function_of_T, a=T_search[0], b=T_search[1], xtol=1e-6)
-            final_state = copy.deepcopy(state_template)
-            final_state.z = z_s
-            final_state.P = P
-            final_state.T = T_crit
-            Z_crit = min(self.eos_engine._get_Z(state=final_state))
-            return T_crit, (Z_crit * 8.314 * T_crit / P)
-        except ValueError:
-            print('não achou nada')
-            return None
-
-    def _refine_T_crit_search(self, state_template: State, P: float, T_init: float) -> tuple:
-        T_guess = T_init
-
-        for i in range(5):
-            z1_s, lambda_min = self._find_unstable_state(state_template=state_template, P=P, T=T_guess)
-
-            z_guess = np.array([z1_s, 1 - z1_s])
-            T_crit, Vm_crit = self._find_critical_temperature(state_template=state_template, z_s=z_guess, P=P, T_search=(150, T_guess+50))
-
-            if T_crit is None:
-                print('Refinamento falhou')
-                return None, None
-            
-            T_guess = T_crit
-
-
-        T_final_guess = T_guess
-        z_final_guess = z_guess
-        Vm_final_guess =  Vm_crit
-
-        return T_final_guess, z_final_guess, Vm_final_guess
-
-    def _obtain_state(self, n: np.ndarray, state: State) -> State:
-        state_local = copy.deepcopy(state) #
-        state_local.n = np.sum(n)
-        state_local.z = n / np.sum(n)
-        state_local.Vm = state_local.V / state_local.n
-        self.eos_engine.calculate_params(state=state_local)
-        self.eos_engine.calculate_state_2(state=state_local)
-        return state_local
-
-    def _calculate_c(self, u:np.ndarray, state: State, eta: float=0.0001):
-        delta = eta * u * np.sqrt(state.z)
-        n_pos = state.z + delta
-        state_pos = self._obtain_state(n=n_pos, state=state)
-        B_pos = self._calculate_B_matrix(state=state_pos)
-        lambda1_pos, _ = self._calculate_eingen(B=B_pos)
-
-        n_neg = state.z - delta
-        state_neg = self._obtain_state(n=n_neg, state=state)
-        B_neg = self._calculate_B_matrix(state=state_neg)
-        lambda1_neg, _ = self._calculate_eingen(B=B_neg)
-        
-        c = (lambda1_pos - lambda1_neg) / (2 * eta)
-        return c
-
-
-
-
-    def calcula(self, state: State):
-        lambda_min = self._get_min_eigenvalue_TP(state=state)
-        print(lambda_min)
-
-
-
-class tester:
-    def __init__(self, EoS_Engine: ModeloPengRobinson):
-        self.eos_engine = EoS_Engine()
-
-    def _objective_function(self, vars, component: Component, T: float):
-        P = vars[0]
-        local_mixture = Mixture(components=[component], k_ij=0.0, l_ij=0.0)
-        vapor_state = State(mixture=local_mixture, z=np.array([1.0]), T=T, P=P, is_vapor=True)
-        liquid_state = State(mixture=local_mixture, z=np.array([1.0]), T=T, P=P, is_vapor=False)
-        Z = self.eos_engine._get_Z(state=vapor_state)
-
-        if len(Z) < 3:
-            return 1e15
-    
-        liquid_state.params = vapor_state.params.copy()
-        
-        self.eos_engine.calculate_state_3(state=vapor_state, Z=max(Z))
-        self.eos_engine.calculate_state_3(state=liquid_state, Z=min(Z))
-
-        vapor_phi = vapor_state.fugacity_dict['phi']
-        liquid_phi = liquid_state.fugacity_dict['phi']
-
-        FO = (np.log(liquid_phi) - np.log(vapor_phi))**2
-        return FO
-
-    def calcula(self, component: Component, T: float, P: float) -> tuple:
-        vars0 = [P]
-        # fo = self._objective_function(vars0, component=component, T=T)
-        result = minimize(fun=self._objective_function,
-                          x0=vars0,
-                          args=(component, T),
-                          method='Nelder-Mead',
-                          options={'maxiter': 1000,
-                                   'xatol': 1e-15,
-                                   'fatol': 1e-15,
-                                   })
-        return result.x[0]
-
-if __name__ == '__main__':  
-    metano = Component(name='Methane', Tc=190.6, Pc=45.99e5, omega=0.012)    
-    dioxide = Component(name='Carbon Dioxide', Tc=304.2, Pc=73.83e5, omega=0.224)
-    sulfeto = Component(name='sulfeto de hidrogenio', Tc=373.5, Pc=89.63e5, omega=0.094)
-    k_ij = 0.08
-    k_ij = np.array([[0, k_ij],[k_ij,0]])
-    mixture = Mixture([metano, sulfeto], k_ij=k_ij, l_ij=0.0)
-    z = np.array([0.001, 0.999])
-    trial_state = State(mixture=mixture, T=280, P=25e5, z=z, is_vapor=True, n=1.0)
-    state_test = copy.deepcopy(trial_state)
-
-
-    PR = ModeloPengRobinson()
-    critical_calc = CriticalPointSolver(EoS_Engine=ModeloPengRobinson)
-    # critical_calc.initial_guess(state=trial_state)
-    high_pressure_calculator = HighPressurCriticalLineSolver(EoS_Engine=ModeloPengRobinson)
-    T, z_s_vector, Vm = high_pressure_calculator._refine_T_crit_search(state_template=trial_state, P=2e8, T_init=300)  
-    print(T, z_s_vector, Vm) 
-
-    
-    state_test.T = T
-    state_test.z = z_s_vector
-    state_test.Vm = Vm
-
-
-    local_state, X, i= critical_calc._newton_solver(state_guess=state_test, spec_var_index=2, spec_var_value=Vm*1.01)
-    print(X)
-    second_state = copy.deepcopy(trial_state)
-    second_state.z = np.array([X[0], 1 - X[0]])
-    second_state.T = np.exp(X[1])
-    second_state.Vm = np.exp(X[2])
-    print(second_state)
-    # vetor_sensibildiade = critical_calc._calculate_sensitivity_vector(state=local_state, spec_var_index=2)
-    # X, spec_var_index_new, spec_var_value_new = critical_calc._calculate_next_step(state=local_state, spec_var_index=2, X=X, iter_newton=i)
-    # print(X[0])
-    # print(np.exp(X[1]) - 273)
-    # print(np.exp(X[2]))
-
-    PVTm = critical_calc.calcula_2(state=second_state, spec_var_index=0, spec_var_value=X[0])

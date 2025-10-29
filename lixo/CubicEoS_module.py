@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from typing import Dict, Optional
 import numpy as np
 from scipy.linalg import eigh
-from abc import ABC, abstractmethod
 
 RGAS_SI = 8.314 # constantes dos gases J mol-1 K-1
 @dataclass
@@ -191,7 +190,7 @@ class SolveZWorker:
             _T = np.cbrt(_R - np.sqrt(_D))
             x1 = _S + _T - (1/3) * a1
             x2 = (-1/2)*(_S + _T) - (1/3) * a1 + (1/2) * 1j * np.sqrt(3) * (_S - _T)
-            x3 = (-1/2)*(_S + _T) - (1/3) * a1 - (1/2) * 1j * np.sqrt(3) * (_S - _T)
+            x3 = (-1/2)*(_S + _T) - (1/3) * a1 + (1/2) * 1j * np.sqrt(3) * (_S - _T)
         # 3. Limpeza das raizes obtidas
         Z = [x1, x2, x3]
         Z = [r.real for r in Z if np.isclose(r.imag, 0) and r.real > 0]
@@ -585,14 +584,10 @@ if __name__ == '__main__':
     # 2. Instancia a mistura
     k_ij = 0.093
     k_ij = np.array([[0, k_ij],[k_ij,0]])
-    mixture = Mixture([metano, nitrogenio], k_ij=0.0, l_ij=0.0)
+    mixture = Mixture([metano, dioxide], k_ij=k_ij, l_ij=0.0)
 
     # 3. Condicoes do flash
     T = 200 # K
     P = 30e5 # Pa
-    z = np.array([0.6, 0.4])
-    trial_state = State(mixture=mixture, T=T, P=P, z=z, is_vapor=True)
-    
-    calc_peng_robinson = ModeloPengRobinson()
-    Z = calc_peng_robinson._get_Z(state=trial_state)
-    print(Z)
+    z = np.array([0.5, 0.5])
+    trial_state = State(mixture=mixture, T=T, z=z, is_vapor=True)

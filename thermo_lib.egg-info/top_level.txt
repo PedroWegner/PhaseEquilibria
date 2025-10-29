@@ -1,0 +1,7 @@
+data
+development
+examples
+lixo
+tests
+thermo_lib
+venv

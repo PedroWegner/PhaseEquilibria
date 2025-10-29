@@ -1,0 +1,3 @@
+RGAS_SI = 8.314 # J mol-1 K-1
+KBOLTZMANN = 1.380649e-23 # m2 kg s-2 K-1
+NAVOGRADO = 6.02214076e23 # mol-1
