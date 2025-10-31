@@ -6,7 +6,7 @@ from abc import ABC
 from .components import Mixture, Component
 
 @dataclass
-class FugacityResults:
+class FugacityResult:
     ln_phi: Optional[np.ndarray[float]] = None
     phi: Optional[np.ndarray[float]] = None
     dlnphi_dT: Optional[np.ndarray[float]] = None
@@ -18,7 +18,7 @@ class FugacityResults:
     mu: Optional[np.ndarray] = None
 
 @dataclass
-class HelmholtzResults(ABC):
+class HelmholtzResult:
     dF_dT: Optional[float] = None
     dF_dV: Optional[float] = None
     dF_dP: Optional[float] = None # Isso aqui, acredito que posso deletar
@@ -31,7 +31,10 @@ class HelmholtzResults(ABC):
     dF_dVV: Optional[float] = None 
 
 @dataclass
-class PCSAFTHelmholtzResults(HelmholtzResults):
+class PCSAFTHelmholtzResult(HelmholtzResult):
+    a_res: Optional[float] = None
+    dares_dxk: Optional[np.ndarray] = None
+    dares_dxjxk: Optional[np.ndarray] = None
     # Aqui tenho que incluir as paradas de 'a_hs, a_hc...'
     pass
 
@@ -68,8 +71,8 @@ class State(BaseState):
     rho: Optional[float] = None
     eta: Optional[float] = None
     # Aqui eh para 'polimorfizar' as proximas etapas
-    fugacity_result: Optional[FugacityResults] = None
-    helmholtz_results: Optional[HelmholtzResults] = None
+    fugacity_result: Optional[FugacityResult] = None
+    helmholtz_results: Optional[HelmholtzResult] = None
     residual_props_results: Optional[ResidualPropertiesResults] = None
 
 

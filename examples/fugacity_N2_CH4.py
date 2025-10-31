@@ -30,11 +30,11 @@ if __name__ == '__main__':
     eos_model.calculate_from_TP(state=trial_state, is_vapor=True)
     eos_model.calculate_fugacity(state=trial_state)
     # print(trial_state.fugacity_dict['n_dlnphi_dni'])
-    # print('Abordagem com Peng-Robison = ',trial_state.helmholtz_derivatives['dF_dV'])
+    print('dF_dV com Peng-Robison = ',trial_state.helmholtz_derivatives['dF_dV'])
     # # print('dF_dP com Peng-Robison = ',trial_state.helmholtz_derivatives['dF_dP'])
-    # print('dF_dVV com Peng-Robison = ',trial_state.helmholtz_derivatives['dF_dVV'])
-    # print('dF_dniV com Peng-Robison = ',trial_state.helmholtz_derivatives['dF_dniV'])
-    # print('dF_dninj com Peng-Robison = ',trial_state.helmholtz_derivatives['dF_dninj'])
-    print('dlnphi com Peng-Robison = ',trial_state.fugacity_dict['n_dlnphi_dni'])
-    
+    print('dF_dVV com Peng-Robison = ',trial_state.helmholtz_derivatives['dF_dVV'])
+    print('dF_dniV com Peng-Robison = ',trial_state.helmholtz_derivatives['dF_dniV'])
+    print('dF_dninj com Peng-Robison = ',trial_state.helmholtz_derivatives['dF_dninj'])
+    print('dlnphi com Peng-Robison = ',trial_state.fugacity_dict['dlnphi_dni'])
+
     

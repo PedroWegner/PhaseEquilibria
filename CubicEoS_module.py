@@ -474,7 +474,7 @@ class TestDerivativesEngine:
             second_test = np.isclose(second_value, 0, 1e-6)
             _test = first_test and second_test
             if _test:
-                print('O teste de criticalidade passaram (Eq. 60 e 61, cap.2)')
+                print('O teste de criticidade passaram (Eq. 60 e 61, cap.2)')
             else: 
                 print("As segunda derivadas não passaram")
 
