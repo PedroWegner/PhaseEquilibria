@@ -1,5 +1,6 @@
 from Pc_saft import *
 from thermo_lib.components import Component, Mixture
+from copy import deepcopy
 
 def test_gibbs_duhem(state: State) -> None:
     ni = state.n * state.z
@@ -60,7 +61,29 @@ print(state_trial.V)
 # print('dF_dni com PC-SAFT = ',state_trial.helmholtz_result.dF_dni)
 # print('dF_dniV com PC-SAFT = ',state_trial.helmholtz_result.dF_dniV)
 print('dF_dninj com PC-SAFT = ',state_trial.helmholtz_result.dF_dninj)
+print('dlnphi_dni com PC-SAFT = ',state_trial.fugacity_result.dlnphi_dni)
+print('dlnphi_dP com PC-SAFT = ',state_trial.fugacity_result.dlnphi_dP)
 # print('dlnphi com PC-SAFT = ',state_trial.fugacity_result.dlnphi_dni)
 
 test_gibbs_duhem(state=state_trial)
 
+e = 0.0001
+state_pos = deepcopy(state_trial)
+state_pos.z[0] += e
+pc_saft_engine.update_parameters(state=state_pos)
+pc_saft_engine.calculate_fugacity(state=state_pos)
+
+state_neg = deepcopy(state_trial)
+state_neg.z[0] -= e
+pc_saft_engine.update_parameters(state=state_neg)
+pc_saft_engine.calculate_fugacity(state=state_neg)
+
+
+dZhc_dxk_anal = state_trial.core_model.hc_results.derivatives.dZhc_dxk
+
+Zhc_pos = state_pos.core_model.hc_results.Z_hc
+Zhc_neg = state_neg.core_model.hc_results.Z_hc
+dZhc_dxk_num = (Zhc_pos - Zhc_neg) / (2 * e)
+
+print('dZhc_dxk_anal = ', dZhc_dxk_anal)
+print('dZhc_dxk_num = ', dZhc_dxk_num)

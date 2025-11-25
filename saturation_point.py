@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import openpyxl as pyxl
 import os
+from time import time
 
 class InitialPointFinder():
     def __init__(self, mixture_template: Mixture):
@@ -144,32 +145,35 @@ class PressureSatEngine:
 if __name__ == '__main__':
     # 1. Cria os componentes para teste
     metano = Component(name='CH4', Tc=190.6, Pc=45.99e5, omega=0.012)    
+    isooctano = Component(name='C8H18', Tc=543.9, Pc=25.68e5, omega=0.304)    
     dioxide = Component(name='CO2', Tc=304.2, Pc=73.83e5, omega=0.224)
     sulfeto = Component(name='H2S', Tc=373.5, Pc=89.63e5, omega=0.094)
 
-    kij = 0.093
+    kij = 0.102
     k_ij = np.array([[0, kij],[kij, 0]])
     
     # 2. Cria a mistura
-    mixture = Mixture([metano, dioxide], k_ij=k_ij, l_ij=0.0)
+    mixture = Mixture([dioxide, isooctano], k_ij=k_ij, l_ij=0.0)
     
     # 3. Instancia uma calculadora
     Pressure_calculator = PressureSatEngine(mixture=mixture, EoSEgine=ModeloPengRobinson)
 
-    T = 199.81
-    P = 1e5
-    x_space = np.linspace(0.00001, 0.925, 200)
-    y = np.array([0.00002, 0.9998])
+    T = 303
+    P = 97300
+    x_space = np.linspace(0.00001, 0.995, 500)
+    y = np.array([0.00002, 0.88])
     y_space = []
     P_space = []
-    
+
+    t0 = time()    
     for x in x_space:
         print(x)
         x_ = np.array([x, 1 - x])
         P, y = Pressure_calculator.calculate_pressure_saturation(T=T, x=x_, P_guess=P, y_guess=y)
         y_space.append(y[0])
         P_space.append(P / 10**5)
-
+    tf = time()
+    print('tempo final ', tf-t0)
     # Pontos experimentais, Donnelly e Katz, 1954, 271K [CH4, CO2]
     # P_exp = [50.53778268, 55.91560949, 59.98345284, 68.11913955, 68.39492554, 72.53171539, 76.39271925]
     # x_exp = [0.0675, 0.084, 0.103, 0.16, 0.157, 0.165, 0.191]
@@ -212,30 +216,34 @@ if __name__ == '__main__':
 
     # plt.scatter(x_exp, P_exp, marker='x', color='brown')
     # plt.scatter(y_exp, P_exp, marker='x', color='goldenrod')
-    plt.scatter(-100, -100, marker='x', color='k', label='Reamer, Sagen e Lacey, 1951')
+    # plt.scatter(-100, -100, marker='x', color='k', label='Reamer, Sagen e Lacey, 1951')
+    x_exp = [0.5, 0.6, 0.7, 0.8, 0.9]
+    P_exp = [37.49, 42.95, 48.71, 51.04, 57.32]
     plt.plot(x_space, P_space, color='k', linewidth=1.25)
+    plt.scatter(x_exp, P_exp, color='red')
     plt.plot(y_space, P_space, color='k', linewidth=1.25, label=r'$k_{ij}=$'+f'{kij}')
     plt.ylabel(ylabel=r'$P\;/\;bar$')
     plt.xlabel(xlabel=r'$x_{1}\;/\;y_{1}$')
     plt.xlim(left=0.0, right=max(y_space)*1.10)
     plt.ylim(bottom=P_space[0]*0.8)
     plt.legend()
-
-    wb = pyxl.Workbook()
-    st = wb.active
-    st['A1'] = 'T'
-    st['B1'] = 'P_cal'
-    st['C1'] = 'x_cal'
-    st['D1'] = 'y_cal'
-    for i in range(len(x_space)):
-        st[f'A{i + 2}'] = T
-        st[f'B{i + 2}'] = P_space[i]
-        st[f'C{i + 2}'] = x_space[i]
-        st[f'D{i + 2}'] = y_space[i]
-
-    comps = ','.join([c.name for c in mixture.components])
-    file_name = comps + '_T=' + str(T) + '_k_ij=' + str(kij)
-    # print(file_name)
-    wb.save((os.path.dirname(os.path.abspath(__file__)) + f'\\data\\{file_name}.xlsx'))
-
     plt.show()
+
+    # wb = pyxl.Workbook()
+    # st = wb.active
+    # st['A1'] = 'T'
+    # st['B1'] = 'P_cal'
+    # st['C1'] = 'x_cal'
+    # st['D1'] = 'y_cal'
+    # for i in range(len(x_space)):
+    #     st[f'A{i + 2}'] = T
+    #     st[f'B{i + 2}'] = P_space[i]
+    #     st[f'C{i + 2}'] = x_space[i]
+    #     st[f'D{i + 2}'] = y_space[i]
+
+    # comps = ','.join([c.name for c in mixture.components])
+    # file_name = comps + '_T=' + str(T) + '_k_ij=' + str(kij)
+    # # print(file_name)
+    # wb.save((os.path.dirname(os.path.abspath(__file__)) + f'\\data\\{file_name}.xlsx'))
+
+    # plt.show()

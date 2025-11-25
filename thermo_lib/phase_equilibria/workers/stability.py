@@ -13,7 +13,7 @@ class StabilityCriteriaWorker:
         n_array = state.n * state.z
         I = np.identity(len(state.mixture.components))
         I = I / n_array
-        B = np.sqrt(np.outer(state.z, state.z)) * (I + state.helmholtz_derivatives['dF_dninj'])
+        B = np.sqrt(np.outer(state.z, state.z)) * (I + state.helmholtz_results.dF_dninj)
         return B
 
     @staticmethod

@@ -6,16 +6,13 @@ from abc import ABC
 from .components import Mixture, Component
 
 @dataclass
-class FugacityResult:
+class FugacityResults:
     ln_phi: Optional[np.ndarray[float]] = None
     phi: Optional[np.ndarray[float]] = None
     dlnphi_dT: Optional[np.ndarray[float]] = None
     dlnphi_dP: Optional[np.ndarray[float]] = None
-    dlnphi_dV: Optional[np.ndarray[float]] = None # Volume molar parcial
     dlnphi_dni: Optional[np.ndarray[float]] = None 
-    dlnphi_dninj: Optional[np.ndarray[float]] = None 
-    deletar_depois: Optional[np.ndarray] = None
-    mu: Optional[np.ndarray] = None
+    n_dlnphi_dni: Optional[np.ndarray[float]] = None
 
 @dataclass
 class HelmholtzResult:
@@ -29,6 +26,12 @@ class HelmholtzResult:
     dF_dTT: Optional[float] = None
     dF_dTV: Optional[float] = None
     dF_dVV: Optional[float] = None 
+
+@dataclass
+class PressureResult:
+    dP_dV: Optional[float] = None 
+    dP_dT: Optional[float] = None
+    dP_dni: Optional[np.ndarray] = None
 
 @dataclass
 class PCSAFTHelmholtzResult(HelmholtzResult):
@@ -71,8 +74,9 @@ class State(BaseState):
     rho: Optional[float] = None
     eta: Optional[float] = None
     # Aqui eh para 'polimorfizar' as proximas etapas
-    fugacity_result: Optional[FugacityResult] = None
+    fugacity_result: Optional[FugacityResults] = None
     helmholtz_results: Optional[HelmholtzResult] = None
+    pressure_results: Optional[PressureResult] = None
     residual_props_results: Optional[ResidualPropertiesResults] = None
 
 

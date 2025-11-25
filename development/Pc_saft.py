@@ -1,5 +1,5 @@
 from thermo_lib.eos.eos_abc import EquationOfState
-from thermo_lib.state import FugacityResult, BaseState, HelmholtzResult, PCSAFTHelmholtzResult
+from thermo_lib.state import FugacityResults, BaseState, HelmholtzResult, PCSAFTHelmholtzResult
 import numpy as np
 from dataclasses import dataclass
 from typing import Dict, Optional
@@ -7,6 +7,7 @@ from typing import Dict, Optional
 from thermo_lib.constants import RGAS_SI, KBOLTZMANN, NAVOGRADO
 from thermo_lib.components import Component, Mixture
 from abc import ABC
+from copy import deepcopy
 # DATACLASSES
 
 
@@ -163,7 +164,7 @@ class State(BaseState):
     eta: Optional[float] = None
     # Aqui eh para 'polimorfizar' as proximas etapas
     helmholtz_result: Optional[PCSAFTHelmholtzResult] = None
-    fugacity_result: Optional[FugacityResult] = None
+    fugacity_result: Optional[FugacityResults] = None
     pressure_result: Optional[PCSaftPressureResult] = None
     # residual_props_results: Optional[ResidualPropertiesResults] = None
 
@@ -1502,7 +1503,6 @@ class HelmholtzWorker:
         dares_dxk = dahc_dxk + dadisp_dxk
         dares_dxjxk = dahc_dxjxk + dadisp_dxjxk
         
-        print('dares_dxjxk=',dares_dxjxk)
 
 
 
@@ -1576,21 +1576,25 @@ class PCSaftFugacityWorker:
         pass
     
     def calculate(self, T:float, Z:float, helmholtz_results:HelmholtzResult,
-                   pressure_results:PCSaftPressureResult, n:float=100.0) -> FugacityResult:
+                   pressure_results:PCSaftPressureResult, n:float=100.0) -> FugacityResults:
         
         dF_dnk, dF_dnjnk = helmholtz_results.dF_dni, helmholtz_results.dF_dninj
         dP_dnk, dP_dV = pressure_results.dP_dni, pressure_results.dP_dV
+        P = pressure_results.P
 
         ln_phi, phi = self._compute_fugacity_coefficient(dF_dnk=dF_dnk, Z=Z)
         n_dln_phik_dnj, dlnphik_dnj = self._compute_n_dlnphik_dnj(T=T, dF_dnjnk=dF_dnjnk, dP_dnk=dP_dnk, dP_dV=dP_dV, n=n)
+        dlnphik_dP = self._compute_dlnphik_dP(T=T, P=P, dP_dnk=dP_dnk, dP_dV=dP_dV)
 
-        return FugacityResult(
+        return FugacityResults(
             ln_phi=ln_phi,
             phi=phi,
             dlnphi_dni=dlnphik_dnj,
-            dlnphi_dninj=dlnphik_dnj,
+            dlnphi_dP=dlnphik_dP,
         )
-        
+    
+    
+
     @staticmethod
     def _compute_fugacity_coefficient(dF_dnk:np.ndarray, Z:float):
         ln_phi = dF_dnk - np.log(Z)
@@ -1606,6 +1610,13 @@ class PCSaftFugacityWorker:
         return n_dlnphik_dnj, n_dlnphik_dnj / n 
 
 
+    @staticmethod
+    def _compute_dlnphik_dP(T:float, P:float, dP_dnk:np.ndarray, dP_dV:float):
+        parcial_Vk = - dP_dnk / dP_dV
+
+        dlnphik_dP = parcial_Vk / (RGAS_SI * T) - 1 / P
+        return dlnphik_dP
+
     def _calculate(self, z: np.ndarray, Z: float, hc_result: PCSaftHardChainResults, disp_result: PCSaftDispersionResults) -> None:
         dach_dx, ar_hc = hc_result.derivatives.dahc_dxk, hc_result.ar_hc
         dadisp_dx, ar_disp = disp_result.derivatives.dadisp_dxk, disp_result.ar_disp
@@ -1613,7 +1624,7 @@ class PCSaftFugacityWorker:
         dares_dx = self._compute_dares_dx(dahc_dx=dach_dx, dadisp_dx=dadisp_dx)
         ares = self._compute_ares(ar_hc=ar_hc, ar_disp=ar_disp)
         ln_phi, phi, mu = self._compute_fugacity(z=z, Z=Z, ares=ares, dares_dx=dares_dx)
-        return FugacityResult(
+        return FugacityResults(
             ln_phi=ln_phi,
             phi=phi,
             deletar_depois=dares_dx,
@@ -1732,3 +1743,81 @@ class PCSaft(EquationOfState):
 
     def calculate_full_state(self, state):
         pass
+    
+    def update_parameters(self, state: State, teste:bool=False):
+        params = self.parameter_worker.calculate_base_results(T=state.T, state=state)
+        coeff_results = self.coeff_worker.calculate(params=params)
+        # Aqui preciso recalcular o eta, porque ele muda enquanto o rho é constante (isso?)
+        state.eta = (np.pi * state.rho / 6) * np.sum(state.z * params.m * params.d**3)
+        self.parameter_worker.update_results(eta=state.eta, params=params)
+        params.rho = state.rho
+        hc_result = self.hc_worker.calculate(params=params)
+        disp_result = self.disp_worker.calculate(eta=state.eta, T=state.T, coeff=coeff_results, params=params)
+        pressure_result = self.pressure_worker.calculate(T=state.T, params=params, hc_results=hc_result, disp_results=disp_result)
+        state.P = pressure_result.P
+        state.Z = pressure_result.Z
+        state.pressure_result = pressure_result
+        state.core_model = PCCoreModel(params=params,
+                                            coeff=coeff_results,
+                                            hc_results=hc_result,
+                                            disp_results=disp_result)
+
+
+if __name__ == "__main__":
+    T = 200 # K
+    P = 30e5 # Pa
+
+    nitrogenio = Component(
+        name='N2',
+        Tc=None,
+        Pc=None,
+        omega=None,
+        sigma=3.3130,
+        epsilon=90.96,
+        segment=1.2053
+    )
+
+    metano = Component(
+        name='CH4',
+        Tc=None,
+        Pc=None,
+        omega=None,
+        sigma=3.7039,
+        epsilon=150.03,
+        segment=1.000
+    )
+
+    mixture = Mixture(
+        components=[nitrogenio, metano],
+        k_ij=0.0,
+        l_ij=0.0
+        )
+
+    state = State(
+        mixture=mixture,
+        z=np.array([0.4, 0.6]),
+        T=T,
+        P=P
+    )
+
+    pc_saft_engine = PCSaft(workers=None)
+    pc_saft_engine.calculate_from_TP(state=state, is_vapor=True)
+    pc_saft_engine.calculate_fugacity(state=state)
+
+    dZhc_dxk_anal = state.core_model.hc_results.derivatives.dahc_dxk
+
+
+    # Testando numericamente
+    # print(160*'*')
+    # print('----Comparação numérica com analítica----')
+    h_x = 0.00001
+    state_xpos = deepcopy(state)
+    state_xpos.z[0] += h_x
+    pc_saft_engine.update_parameters(state=state_xpos)
+    pc_saft_engine.calculate_fugacity(state=state_xpos)
+
+    state_xneg = deepcopy(state)
+    state_xneg.z[0] -= h_x
+    pc_saft_engine.update_parameters(state=state_xneg)
+    pc_saft_engine.calculate_fugacity(state=state_xneg)
+

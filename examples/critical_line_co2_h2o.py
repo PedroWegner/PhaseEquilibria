@@ -15,40 +15,44 @@ class ELV_pure:
     def __init__(self, eos_model: EquationOfState):
         self.eos_model = eos_model
 
-    def _compute_FO(self, state: State, P: float):
+    def _compute_FO_dFO_dP(self, state: State, P: float):
         local_state = deepcopy(state)
         local_state.P = P
 
         # Calcula a compressibilidade e fugacidade da fase vapor
         self.eos_model.calculate_from_TP(state=local_state, is_vapor=True)
         self.eos_model.calculate_fugacity(state=local_state)
-        phi_v = local_state.fugacity_dict['phi']
+        phi_v = local_state.fugacity_result.phi
+        dlnphi_dP_v = local_state.fugacity_result.dlnphi_dP
 
         # Calcula a compressibilidade e fugacidade da fase liquida
         self.eos_model.calculate_from_TP(state=local_state, is_vapor=False)
         self.eos_model.calculate_fugacity(state=local_state)
-        phi_l= local_state.fugacity_dict['phi']
+        phi_l= local_state.fugacity_result.phi
+        dlnphi_dP_l = local_state.fugacity_result.dlnphi_dP
 
         FO = (np.log(phi_l) - np.log(phi_v))**2
-        return FO
+        dFO = 2 * (np.log(phi_l) - np.log(phi_v)) * (dlnphi_dP_l - dlnphi_dP_v)
+        return FO, dFO
         
 
-    def _compute_dFO_dP(self, state: State, P: float, eta: float=0.001):
-        P_pos = P + eta
-        FO_pos = self._compute_FO(state=state, P=P_pos)
-        P_neg = P - eta
-        FO_neg = self._compute_FO(state=state, P=P_neg)
+    # def _compute_dFO_dP(self, state: State, P: float, eta: float=0.001):
+    #     P_pos = P + eta
+    #     FO_pos = self._compute_FO(state=state, P=P_pos)
+    #     P_neg = P - eta
+    #     FO_neg = self._compute_FO(state=state, P=P_neg)
 
-        dFO_dP = (FO_pos - FO_neg) / (2 * eta)
-        return dFO_dP
+    #     dFO_dP = (FO_pos - FO_neg) / (2 * eta)
+
+    #     return dFO_dP
         
 
     def calcule_by_NR(self, state: State, T: float, P_k: float, max_iter: int=250, tol: float=1e-6) -> float:
         state_local = deepcopy(state)
         state_local.T = T
         for _ in range(max_iter):
-            FO = self._compute_FO(state=state_local, P=P_k)
-            dFO = self._compute_dFO_dP(state=state_local, P=P_k)
+            FO, dFO= self._compute_FO_dFO_dP(state=state_local, P=P_k)
+            # dFO = self._compute_dFO_dP(state=state_local, P=P_k)
             P_k1 = P_k - FO / dFO
 
             if np.abs(P_k- P_k1) < tol:
@@ -64,7 +68,7 @@ if __name__ == '__main__':
     water = Component(name='water', Tc=647.1, Pc=220.55e5, omega=0.345)
 
     # 2. Define binary parameters (k_ij and l_ij)
-    kij = 0.13
+    kij = 0.0
     k_ij = np.array([[0, kij],[kij,0]])
 
     # 3. Construct a mixture with two molecules
@@ -83,6 +87,7 @@ if __name__ == '__main__':
     # 7. Construct a critical line calculator (this method is implemented considering cubic equations)
     critical_line_calculator = CriticalLineCalculator(eos_model=eos_model)
     critical_line_calculator.initial_guess(state=trial_state)
+
     # 8. Set initial guess, this can change the final result or the time to reach
     z_alvo = 0.001
     T_alvo = trial_state.T
@@ -122,6 +127,7 @@ if __name__ == '__main__':
 
 
     print("--- Newton-Raphson---")
+    t0 = time()
     for T in T_water:
         P_water_0 = elv_pure.calcule_by_NR(state=water_state, T=T, P_k=P_water_0)
         P_water.append(P_water_0 / 10**5)
@@ -129,10 +135,11 @@ if __name__ == '__main__':
     plt.plot(T_water_c, P_water, linewidth=1.25, color='black')
 
     for T in T_co2:
-        print(T)
         P_co2_0 = elv_pure.calcule_by_NR(state=co2_state, T=T, P_k=P_co2_0)
         P_co2.append(P_co2_0/ 10**5)
         T_co2_c.append(T - 273.15)
+    tf = time()
+    print('tempo total: ', tf - t0, ' s')
 
     # 11. Plotting the binary line
     x = []

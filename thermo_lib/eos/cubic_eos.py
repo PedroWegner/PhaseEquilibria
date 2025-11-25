@@ -46,10 +46,14 @@ class CubicEquationOfState(EquationOfState):
             raise ValueError('The thermodynamic state was not calculated, there is no value for compressibility')
         
         state.core_model = self.workers.core_model.core_model_to_dict(state=state)
-        state.helmholtz_derivatives = self.workers.helmholtz_derivatives.helmholtz_derivatives_to_dict(state=state)
-        state.P_derivatives = self.workers.pressure_derivatives.P_derivatives_to_dict(state=state)
-        state.fugacity_dict = self.workers.fugacity.fugacity_to_dict(state=state)
-        pass
+        
+        helmholtz_results = self.workers.helmholtz_derivatives.helmholtz_derivatives_to_dict(state=state)
+        state.helmholtz_results = helmholtz_results
+        pressure_results = self.workers.pressure_derivatives.P_derivatives_to_dict(state=state)
+        state.pressure_results = pressure_results
+        fugacity_results = self.workers.fugacity.fugacity_to_dict(state=state)
+        
+        state.fugacity_result = fugacity_results
     
     def calculate_pressure(self, state: State) -> None:
         if state.T is None or state.Vm is None:

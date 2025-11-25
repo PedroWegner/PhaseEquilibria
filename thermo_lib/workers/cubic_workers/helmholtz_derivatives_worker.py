@@ -1,12 +1,13 @@
-from ...state import State
+from ...state import State, HelmholtzResult
 from typing import Dict
 import numpy as np
 
 class CubicHelmholtzDerivativesWorker:
     def __init__(self):
-        self.derivatives = {}
+        # self.derivatives = {}
+        pass
 
-    def _calculate_F_parcial_derivatives(self, params: Dict[str, any], core_model: Dict[str, float]) -> None:
+    def _calculate_F_parcial_derivatives(self, params: Dict[str, any], core_model: Dict[str, float]) -> HelmholtzResult:
         Bi = np.array(params['Bi'])
         Di = np.array(params['Di'])
         DiT = params['DiT']
@@ -31,25 +32,39 @@ class CubicHelmholtzDerivativesWorker:
         FTV = core_model['FTV']
         FVV = core_model['FVV']
 
-        self.derivatives['dF_dni'] = Fn + FB * Bi + FD * Di
-        self.derivatives['dF_dT'] = FT + FD * DT
-        self.derivatives['dF_dV'] = FV
-
+        # First derivatives
+        dF_dni = Fn + FB * Bi + FD * Di
+        dF_dT = FT + FD * DT
+        dF_dV = FV
+        # Second derivatives
         t_FnB = FnB * (np.add.outer(Bi, Bi))
         t_FBD = FBD * (np.outer(Bi, Di) + np.outer(Di, Bi))
-        self.derivatives['dF_dninj'] = t_FnB + t_FBD + FB * Bij + FBB * np.outer(Bi, Bi) + FD * Dij
-        self.derivatives['dF_dniT'] = (FBT + FBD * DT) * Bi + FDT * Di + FD * DiT
-        self.derivatives['dF_dniV'] = FnV + FBV * Bi + FDV * Di 
-        self.derivatives['dF_dTT'] = FTT + 2 * FDT * DT + FD * DTT
-        self.derivatives['dF_dTV'] = FTV + FDV * DT
-        self.derivatives['dF_dVV'] = FVV
+        dF_dninj = t_FnB + t_FBD + FB * Bij + FBB * np.outer(Bi, Bi) + FD * Dij
+        dF_dniT = (FBT + FBD * DT) * Bi + FDT * Di + FD * DiT
+        dF_dniV = FnV + FBV * Bi + FDV * Di 
+        dF_dTT = FTT + 2 * FDT * DT + FD * DTT
+        dF_dTV = FTV + FDV * DT
+        dF_dVV = FVV
+
+        return HelmholtzResult(
+            dF_dT=dF_dT,
+            dF_dV=dF_dV,
+            dF_dP=None,
+            dF_dni=dF_dni,
+            dF_dninj=dF_dninj,
+            dF_dniT=dF_dniT,
+            dF_dniV=dF_dniV,
+            dF_dTT=dF_dTT,
+            dF_dTV=dF_dTV,
+            dF_dVV = dF_dVV
+        )
     
-    def helmholtz_derivatives_to_dict(self, state: State) -> Dict[str, any]:
+    def helmholtz_derivatives_to_dict(self, state: State) -> any:
         params = state.params
         core_model = state.core_model
-        self.derivatives = {}
-        self._calculate_F_parcial_derivatives(params=params, core_model=core_model)
-        return self.derivatives
+        # self.derivatives = {}
+        helmhotz_results = self._calculate_F_parcial_derivatives(params=params, core_model=core_model)
+        return helmhotz_results
 
 
     
